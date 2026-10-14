@@ -1,0 +1,13 @@
+# État désiré de l'environnement dev — source de vérité GitOps.
+# Le bloc `image` est mis à jour AUTOMATIQUEMENT par la CI (job update-gitops) à chaque
+# commit sur main : ne pas le modifier à la main.
+image:
+  registry: ""
+  tag: "0.1.0"
+
+ingress:
+  host: dev.plateforme.local
+api:
+  logLevel: DEBUG
+database:
+  storage: 512Mi

@@ -1,0 +1,297 @@
+# =============================================================================
+# Pipeline CI DevSecOps
+#   1. Qualité : lint + tests (unitaires et intégration avec PostgreSQL)
+#   2. Sécurité du code : Gitleaks (secrets, tout l'historique), Semgrep (SAST)
+#   3. Sécurité de l'infrastructure : Trivy (IaC + dépendances), terraform, helm, ansible-lint
+#   4. Build des images → scan Trivy bloquant → publication GHCR (main uniquement)
+#   5. Mise à jour de l'état désiré GitOps (k8s/environments/dev) avec le tag immuable
+#
+# Les étapes 1 à 3 tournent en parallèle ; tout échec bloque le build et la publication.
+# Actions tierces épinglées par SHA de commit (le tag est indiqué en commentaire).
+# =============================================================================
+name: CI DevSecOps
+
+on:
+  push:
+    branches: [main]
+    # Les commits GitOps de la CI ne modifient que k8s/environments : inutile de tout relancer
+    paths-ignore: ["k8s/environments/**", "docs/**", "**.md"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Moindre privilège : aucune permission par défaut, chaque job déclare les siennes
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Sur une PR, un nouveau push annule le run précédent ; sur main, chaque commit va au bout
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Versions des outils : identiques au poste local (scripts/install.sh), recul >= 2 semaines
+  TRIVY_VERSION: "0.74.0"
+  GITLEAKS_VERSION: "8.30.1"
+  SEMGREP_VERSION: "1.178.0"
+  ANSIBLE_LINT_VERSION: "26.9.0"
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint-test:
+    name: Lint et tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_DB: plateforme
+          POSTGRES_USER: plateforme
+          # Base éphémère, interne au runner et détruite en fin de job : authentification
+          # « trust » plutôt qu'un faux mot de passe en clair dans le dépôt
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U plateforme" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: app/backend/requirements-dev.txt
+      - name: Installer les dépendances
+        run: pip install -r backend/requirements-dev.txt
+      - name: Lint (ruff)
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
+      - name: Tests unitaires et d'intégration
+        env:
+          RUN_INTEGRATION: "1"
+          DB_HOST: localhost
+        run: pytest -v --cov=api --cov-report=term-missing --cov-fail-under=90 --junitxml=../reports/junit.xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rapport-tests
+          path: reports/junit.xml
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  secrets-scan:
+    name: Secrets (Gitleaks)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # tout l'historique : un secret supprimé reste dans Git
+          persist-credentials: false
+      - name: Installer Gitleaks (somme SHA-256 vérifiée)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "$base/$archive"
+          curl -fsSL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " ${archive}$" | sha256sum -c -
+          tar -xzf "$archive" gitleaks && sudo install -m 0755 gitleaks /usr/local/bin/
+      - name: Analyser l'historique Git
+        # --redact : la valeur d'un secret trouvé n'apparaît jamais dans les logs de la CI
+        run: gitleaks git --redact --verbose --report-format sarif --report-path gitleaks.sarif .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rapport-gitleaks
+          path: gitleaks.sarif
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Installer Semgrep
+        run: pip install "semgrep==${SEMGREP_VERSION}"
+      - name: Analyse statique
+        # --error : tout constat fait échouer le job ; --metrics=off : pas de télémétrie
+        run: >-
+          semgrep scan --metrics=off --error
+          --config p/python --config p/bandit --config p/security-audit
+          --config p/javascript --config p/dockerfile --config p/secrets
+          --sarif --output semgrep.sarif
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rapport-semgrep
+          path: semgrep.sarif
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  iac:
+    name: IaC et dépendances
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Installer Trivy (somme SHA-256 vérifiée)
+        run: |
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSLO "$base/$archive"
+          curl -fsSL "$base/trivy_${TRIVY_VERSION}_checksums.txt" | grep " ${archive}$" | sha256sum -c -
+          tar -xzf "$archive" trivy && sudo install -m 0755 trivy /usr/local/bin/
+      - name: Trivy - mauvaises configurations (Terraform, Kubernetes/Helm, Dockerfiles)
+        run: trivy config --config trivy.yaml .
+      - name: Trivy - vulnérabilités des dépendances (SCA) et secrets dans les fichiers
+        run: trivy fs --config trivy.yaml --scanners vuln,secret .
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+      - name: Terraform - format et validation (sans identifiants AWS)
+        run: |
+          terraform fmt -recursive -check infra/terraform
+          for dir in infra/terraform/aws infra/terraform/local; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: "v4.3.0"
+      - name: Helm - lint par environnement
+        run: |
+          for env in dev prod; do
+            helm lint k8s/helm/plateforme -f "k8s/environments/${env}/values.yaml"
+          done
+      - name: Ansible - collections et lint
+        working-directory: infra/ansible
+        run: |
+          pip install "ansible-lint==${ANSIBLE_LINT_VERSION}"
+          ansible-galaxy collection install -r requirements.yml -p ./collections
+          ansible-lint
+
+  # ---------------------------------------------------------------------------
+  build-scan-push:
+    name: Image ${{ matrix.component }}
+    needs: [lint-test, secrets-scan, sast, iac]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write          # publication GHCR (utilisée uniquement sur main)
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - component: api
+            context: app
+          - component: frontend
+            context: app/frontend
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Calculer le nom et le tag immuable de l'image
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"   # GHCR exige des minuscules
+          echo "image=${REGISTRY}/${owner}/plateforme-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Construire l'image (chargée localement pour le scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          build-args: APP_VERSION=${{ steps.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Installer Trivy (somme SHA-256 vérifiée)
+        run: |
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSLO "$base/$archive"
+          curl -fsSL "$base/trivy_${TRIVY_VERSION}_checksums.txt" | grep " ${archive}$" | sha256sum -c -
+          tar -xzf "$archive" trivy && sudo install -m 0755 trivy /usr/local/bin/
+      - name: Scan de l'image (bloquant HIGH/CRITICAL corrigeables)
+        run: trivy image --config trivy.yaml "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+      - name: Rapport complet et SBOM (toutes sévérités, non bloquant)
+        if: always()
+        run: |
+          mkdir -p reports
+          ref="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+          trivy image --quiet --exit-code 0 --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+            --format json --output "reports/trivy-${{ matrix.component }}.json" "$ref"
+          trivy image --quiet --format cyclonedx --output "reports/sbom-${{ matrix.component }}.cdx.json" "$ref"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rapports-image-${{ matrix.component }}
+          path: reports/
+          retention-days: 14
+      - name: Connexion à GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # jeton éphémère du run, aucun secret à créer
+      - name: Publier l'image scannée
+        if: env.PUBLISH == 'true'
+        run: docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+
+  # ---------------------------------------------------------------------------
+  update-gitops:
+    name: Mise à jour GitOps (dev)
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write          # commit de l'état désiré (seul job autorisé à écrire)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Écrire le nouveau tag dans l'état désiré de dev
+        run: |
+          tag="sha-${GITHUB_SHA::12}"
+          registry="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}"
+          yq -i ".image.registry = \"${registry}\" | .image.tag = \"${tag}\"" k8s/environments/dev/values.yaml
+          git diff --stat
+      - name: Commit et push (sans redéclencher la CI)
+        # Un push réalisé avec GITHUB_TOKEN ne déclenche pas de nouveau workflow (pas de boucle)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/environments/dev/values.yaml
+          git commit -m "chore(gitops): déployer sha-${GITHUB_SHA::12} en dev"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            echo "Push refusé (tentative ${attempt}), nouvel essai..."; sleep 5
+          done
+          exit 1

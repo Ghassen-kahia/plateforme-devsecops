@@ -1,0 +1,8 @@
+# Fichiers exclus de l'analyse Semgrep (SAST)
+# Dépendances et artefacts locaux
+.venv/
+reports/
+**/.terraform/
+# Templates Helm : syntaxe Go template, pas du YAML valide avant rendu
+# (le chart rendu est analysé par Trivy, règles Kubernetes dédiées)
+k8s/helm/**/templates/

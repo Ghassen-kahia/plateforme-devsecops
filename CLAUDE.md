@@ -31,6 +31,7 @@ Toute la documentation et les explications sont **en français**.
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
 Installés en Phase 2 : Trivy 0.76.0.
+Installés en Phase 5 : gh 2.102.0 (dépôt APT GitHub), gitleaks 8.30.1 et actionlint 1.7.12 (releases vérifiées), shellcheck 0.9.0 (Ubuntu), semgrep 1.178.0 (~/.venvs/semgrep). Trivy remplacé par le binaire 0.74.0 figé.
 Installés en Phase 4 : k3s v1.36.5+k3s1 (Ansible), kubectl 1.36.5 (pkgs.k8s.io), Helm 4.3.0 (dépôt Helm).
 Installés en Phase 3 : Terraform 1.16.6 (dépôt HashiCorp), Ansible (core 2.16.3) et ansible-lint 6.17.2 (dépôts Ubuntu).
 Encore absents : kubectl, helm, k3s, terraform, ansible, trivy, gitleaks, semgrep, pandoc, marp, node.
@@ -134,7 +135,15 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] dev et prod déployés manuellement, temps mesurés
   - [x] Probes, NetworkPolicy (contrôle positif), HPA, quota, release défectueuse et rollback testés
   - [x] Incident 502 diagnostiqué et corrigé (label de version dans le pod PostgreSQL)
-- [ ] Phase 5 — Pipeline CI DevSecOps (+ gitleaks, semgrep en local ; token GitHub à ce moment)
+- [ ] **Phase 5 — Pipeline CI DevSecOps** (en cours : partie locale terminée, GitHub requis)
+  - [x] gh 2.102, gitleaks 8.30.1, actionlint 1.7.12, shellcheck, semgrep 1.178.0 (venv), Trivy figé en 0.74.0
+  - [x] `.github/workflows/ci.yml` (lint/test, gitleaks, semgrep, IaC/SCA, build/scan/push GHCR, update-gitops)
+  - [x] `.github/workflows/promote.yml` (promotion manuelle dev → prod)
+  - [x] État désiré par environnement : `k8s/environments/{dev,prod}/values.yaml`
+  - [x] Contrôles positifs locaux : secret factice et dépendance vulnérable bloqués
+  - [ ] Dépôt GitHub créé et poussé (authentification `gh auth login` par l'utilisateur)
+  - [ ] Premier pipeline vert, images dans GHCR, commit GitOps automatique
+  - [ ] PR de démonstration bloquées (secret factice, vulnérabilité) et durées mesurées
 - [ ] Phase 6 — GitOps avec Argo CD
 - [ ] Phase 7 — Supervision
 - [ ] Phase 8 — Documentation professionnelle
@@ -157,8 +166,12 @@ trivy config app/                    # Dockerfiles
 terraform fmt -recursive -check infra/terraform && terraform -chdir=infra/terraform/aws validate
 trivy config --config trivy.yaml infra/
 (cd infra/ansible && ansible-lint && ansible-playbook site.yml --check)
-helm lint k8s/helm/plateforme -f k8s/helm/plateforme/values-prod.yaml
+helm lint k8s/helm/plateforme -f k8s/environments/prod/values.yaml
 trivy config --config trivy.yaml .     # tout le dépôt (une seule cible)
+trivy fs --config trivy.yaml --scanners vuln,secret --skip-dirs reports .   # SCA
+gitleaks git --redact .                # secrets dans l'historique
+~/.local/bin/semgrep scan --metrics=off --error --config p/python --config p/bandit --config p/security-audit --config p/javascript --config p/dockerfile --config p/secrets
+actionlint                             # workflows (+ shellcheck)
 kubectl get pods -A ; kubectl -n plateforme-dev get pods,svc,ingress,netpol
 curl --resolve dev.plateforme.local:80:127.0.0.1 http://dev.plateforme.local/ready
 docker run --rm hello-world          # moteur Docker fonctionnel
@@ -191,4 +204,8 @@ git status
 | 2026-10-14 | Frontend relaie /api (une seule route Ingress) | Même topologie qu'en Compose, pas de CORS |
 | 2026-10-14 | UID > 10000 pour tous les conteneurs | Pas de collision avec les UID de l'hôte (KSV-0020/21) |
 | 2026-10-14 | Pas de label de version dans le modèle de pod PostgreSQL | Une release applicative ne doit pas redémarrer la base |
+| 2026-10-14 | Versions d'outils avec ≥ 2 semaines de recul (Trivy 0.74.0, Semgrep 1.178.0, ansible-lint 26.9.0) | Prudence supply chain |
+| 2026-10-14 | Actions GitHub épinglées par SHA, permissions `{}` par défaut | Moindre privilège, immuabilité |
+| 2026-10-14 | État GitOps dans ce dépôt (`k8s/environments/`), mis à jour par `GITHUB_TOKEN` | Aucun secret supplémentaire ; dépôt séparé = alternative documentée |
+| 2026-10-14 | Tag d'image `sha-<12>` | Traçabilité commit ↔ image, rollback sans ambiguïté |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

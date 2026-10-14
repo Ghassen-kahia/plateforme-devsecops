@@ -509,7 +509,7 @@ kubectl -n plateforme-dev describe pod <pod>   # événements : probes, pull d'i
 kubectl -n plateforme-dev logs deploy/plateforme-dev-api
 kubectl top nodes; kubectl top pods -A         # metrics-server
 kubectl get events -n plateforme-dev --sort-by=.lastTimestamp
-helm lint k8s/helm/plateforme -f k8s/helm/plateforme/values-dev.yaml
+helm lint k8s/helm/plateforme -f k8s/environments/dev/values.yaml
 helm template t k8s/helm/plateforme | less     # rendu sans installer
 helm -n plateforme-dev history plateforme-dev
 helm -n plateforme-dev rollback plateforme-dev <rév> --wait
@@ -559,3 +559,111 @@ curl --resolve dev.plateforme.local:80:127.0.0.1 http://dev.plateforme.local/rea
    nœud était saturé. L'autoscaling horizontal n'a de sens que si des ressources sont disponibles. En
    production, il est couplé au Cluster Autoscaler ou à Karpenter, qui ajoutent des nœuds. Ici, il
    démontre le mécanisme et protège contre les pics modérés.
+
+---
+
+## Phase 5 — Pipeline CI DevSecOps (GitHub Actions)
+
+### Vue d'ensemble du pipeline (`.github/workflows/ci.yml`)
+
+```
+push / pull_request
+  ├── lint-test      ruff + pytest (unitaires + intégration, PostgreSQL en conteneur de service, couverture ≥ 90 %)
+  ├── secrets-scan   Gitleaks sur TOUT l'historique Git
+  ├── sast           Semgrep (python, bandit, security-audit, javascript, dockerfile, secrets)
+  └── iac            Trivy config + Trivy fs (SCA) + terraform fmt/validate + helm lint + ansible-lint
+          │  (les 4 doivent réussir)
+          ▼
+  build-scan-push (matrice api / frontend)
+     build → Trivy image (bloquant) → rapport complet + SBOM CycloneDX → push GHCR (main uniquement)
+          ▼
+  update-gitops (main uniquement)  → commit du tag sha-<12> dans k8s/environments/dev/values.yaml
+promote.yml (manuel)               → recopie le tag de dev vers k8s/environments/prod/values.yaml
+```
+
+**« Shift left »** : les contrôles les moins coûteux (lint, secrets, SAST) tournent en premier et en
+parallèle. Une image n'est construite et publiée que si tout est vert. Une image non scannée ne peut
+donc pas atteindre le registre.
+
+### Sécurité de la chaîne d'approvisionnement (supply chain)
+
+| Mesure | Pourquoi |
+|---|---|
+| `permissions: {}` global, permissions minimales par job | Le `GITHUB_TOKEN` d'un job compromis ne peut faire que ce que ce job doit faire. Seuls `build-scan-push` (packages:write) et `update-gitops` (contents:write) écrivent |
+| Actions épinglées par **SHA de commit** | Un tag (`v4`) est mobile : un mainteneur compromis peut le déplacer vers du code malveillant (cas `tj-actions/changed-files`, mars 2025). Un SHA est immuable |
+| Actions limitées à GitHub (`actions/*`) et Docker (`docker/*`), plus 2 actions d'installation (HashiCorp, Azure) | Moins de tiers = moins de risque |
+| Outils (Trivy, Gitleaks, Semgrep) installés en CLI avec version figée et SHA-256 vérifiée | Mêmes versions qu'en local, pas d'action tierce supplémentaire |
+| Versions choisies avec **au moins 2 semaines de recul** | Une release compromise ou défectueuse est généralement détectée dans les jours qui suivent sa publication. Trivy 0.76.0, publié le jour même, a été remplacé par 0.74.0 (2 mois) |
+| `persist-credentials: false` sur les checkouts en lecture | Le jeton n'est pas laissé sur le disque du runner pour les étapes suivantes |
+| GHCR via `GITHUB_TOKEN` | Jeton éphémère (durée du run) : aucun secret longue durée à créer ni à faire tourner |
+| Push de la CI avec `GITHUB_TOKEN` | Ce type de push ne déclenche pas de nouveau workflow, donc pas de boucle infinie |
+
+### Tag immuable
+
+`sha-<12 premiers caractères du commit>` : chaque image est liée à un commit précis. `latest` est à
+proscrire : on ne sait plus ce qui tourne, et un rollback vers `latest` ne veut rien dire.
+**Limite** : GHCR n'interdit pas techniquement d'écraser un tag. L'immuabilité repose sur la
+convention (un SHA n'est construit qu'une fois). Le niveau supérieur serait de déployer par
+**digest** (`image@sha256:…`) et de signer les images (cosign).
+
+### Contrôles positifs (« un scanner silencieux ne prouve rien »)
+
+| Outil | Contrôle positif | Résultat |
+|---|---|---|
+| Semgrep | Fichier volontairement vulnérable (hors dépôt) | `p/bandit` détecte shell=True, injection SQL, MD5 ; `yaml.load` non détecté (limite documentée) |
+| Gitleaks | Commit d'une clé factice (aléatoire) dans un clone jetable | Bloqué (code 1), valeur masquée |
+| Gitleaks | Suppression de la clé dans un commit suivant | **Toujours bloqué** : le secret reste dans l'historique |
+| Trivy fs | `pyyaml==5.3.1` ajouté aux dépendances | Bloqué : CVE-2020-14343 CRITICAL (corrigée en 5.4) |
+| Trivy image | Image `python:3.12.15` (Phase 2) | Bloqué : 12 HIGH corrigeables |
+
+### Concept : que faire si un vrai secret est commité ?
+
+1. **Révoquer immédiatement** le secret chez le fournisseur : c'est la seule action qui supprime le risque.
+2. **En générer un nouveau** (rotation) et le déployer par le canal prévu (secret GitHub, Secret K8s).
+3. Analyser l'exposition : depuis quand, dépôt public ou non, journaux d'accès du fournisseur.
+4. Seulement ensuite, nettoyer l'historique (`git filter-repo`) si nécessaire. Cela réécrit l'historique,
+   impose un push forcé coordonné, et **ne supprime pas** les clones, forks ni caches existants.
+5. Ajouter une protection en amont : hook pre-commit Gitleaks, push protection de GitHub.
+
+Supprimer le fichier dans un nouveau commit ne sert à rien : le secret reste dans l'historique
+(démontré ci-dessus).
+
+### Erreurs rencontrées — Phase 5 (partie locale)
+
+| Problème | Cause | Solution |
+|---|---|---|
+| ansible-lint 26.9 : « couldn't resolve module ansible.posix.sysctl » | Le paquet Ubuntu fournissait les collections implicitement ; pas pip | `requirements.yml` avec versions figées, `ansible-galaxy collection install` |
+| community.general 13.x incompatible avec ansible-core 2.16 (local) | `requires_ansible >= 2.18` | Version 11.4.9 (compatible 2.16 et 2.21) |
+| ansible-lint analyse 3 504 fichiers | Collections téléchargées dans `infra/ansible/collections` | `.ansible-lint` : `exclude_paths` |
+| Semgrep : 8 erreurs de parsing | Templates Helm (syntaxe Go) analysés comme du YAML | `.semgrepignore` (le chart rendu est couvert par Trivy) |
+| actionlint « OK » sans analyser les scripts | shellcheck absent | shellcheck installé ; SC2015 corrigé dans install.sh |
+| Trivy local en 0.76.0 (publiée le jour même) | Paquet APT flottant | Binaire 0.74.0 figé, SHA-256 vérifiée ; tous les contrôles revalidés |
+
+### Questions d'entretien — Phase 5
+
+1. **Pourquoi épingler les actions par SHA plutôt que par tag ?**
+   Un tag Git est un pointeur mobile. Si le compte d'un mainteneur est compromis, l'attaquant peut
+   déplacer `v4` vers un commit malveillant, qui s'exécutera dans tous les pipelines qui l'utilisent,
+   avec leurs secrets. C'est arrivé avec `tj-actions/changed-files` en 2025. Un SHA désigne un contenu
+   précis et immuable. Le tag reste en commentaire pour la lisibilité, et Dependabot ou Renovate
+   peuvent proposer les mises à jour.
+2. **Comment avez-vous appliqué le moindre privilège dans GitHub Actions ?**
+   `permissions: {}` au niveau du workflow, puis par job : `contents: read` partout, `packages: write`
+   uniquement pour la publication, `contents: write` uniquement pour le commit GitOps. Le jeton est
+   éphémère et propre au run. Aucun secret longue durée n'est nécessaire pour GHCR.
+3. **Un développeur supprime un mot de passe qu'il avait commité. Le problème est-il réglé ?**
+   Non, voir la procédure ci-dessus. Je l'ai démontré : Gitleaks échoue toujours après la suppression.
+   La seule vraie correction est la révocation et la rotation.
+4. **Pourquoi Semgrep plutôt que SonarQube ?**
+   Semgrep s'exécute en CLI, sans serveur, en quelques secondes, avec des règles lisibles et
+   personnalisables. SonarQube apporte un suivi de la dette et de la qualité dans le temps, mais demande
+   un serveur, une base de données et environ 2 Go de RAM : c'est disproportionné pour une VM à 2 vCPU.
+   Limite constatée : aucun jeu de règles n'a détecté `yaml.load`. Un SAST ne remplace ni la revue
+   de code ni les tests.
+5. **(Compromis)** **Pourquoi des vulnérabilités sans correctif ne bloquent-elles pas le pipeline ?**
+   Voir la Phase 2 : bloquer ce qui est corrigeable, tracer le reste (rapport JSON et SBOM en artefact),
+   et reconstruire régulièrement. Sinon, l'équipe finit par désactiver le contrôle.
+6. **(Dépannage)** **Le job ansible-lint échoue en CI alors qu'il passe en local. Pourquoi ?**
+   Cas réel : la version locale (Ubuntu) embarquait implicitement les collections, alors que la
+   version pip de la CI ne les avait pas. Il fallait déclarer la dépendance cachée dans
+   `requirements.yml`, figer les versions et reproduire l'environnement CI en local (venv) avant de pousser.

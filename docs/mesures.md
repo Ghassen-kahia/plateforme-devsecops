@@ -191,6 +191,22 @@ erreurs humaines (qui sont justement le risque du déploiement manuel).
 - **Limites** : un seul nœud (pas de test de perte de nœud) ; charge générée depuis la VM elle-même
   (le générateur consomme aussi du CPU) ; mesures ponctuelles, non moyennées sur plusieurs runs.
 
+## M6 — Contrôles de sécurité du pipeline, répétition locale (Phase 5)
+
+- **Date** : 2026-10-14 — Gitleaks 8.30.1, Semgrep 1.178.0, Trivy 0.74.0, actionlint 1.7.12.
+
+| Contrôle | Résultat sur le dépôt | Contrôle positif (doit bloquer) |
+|---|---|---|
+| Gitleaks (historique, 5 commits) | 0 fuite | Clé factice commitée : **bloqué** (code 1) ; après suppression : **toujours bloqué** |
+| Gitleaks (répertoire de travail) | 5 détections, toutes dans des fichiers ignorés par Git : `.env` (vrai positif, protégé par .gitignore), rapports Trivy (faux positifs) | — |
+| Semgrep (72 fichiers) | 0 constat, 0 erreur, 4 s | Fichier vulnérable : 4 lignes sur 5 détectées (yaml.load manqué) |
+| Trivy fs (SCA) | 0 vulnérabilité | `pyyaml==5.3.1` : **bloqué** (CVE-2020-14343 CRITICAL) |
+| actionlint + shellcheck | 2 workflows valides | — |
+| ansible-lint 26.9.0 (version CI) | 0 échec (profil production) | — |
+
+- **Limites** : répétition locale ; le comportement réel dans GitHub Actions (durées, blocage effectif
+  d'une PR) sera mesuré après la publication du dépôt.
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
@@ -199,7 +215,7 @@ erreurs humaines (qui sont justement le risque du déploiement manuel).
 | Vulnérabilités avant/après correction, par sévérité | 2 | mesuré (M3) |
 | Temps de déploiement manuel (Helm) | 4 | mesuré (M5) |
 | Consommation CPU/RAM du cluster | 4, 6, 7 | Phase 4 mesurée (M5) |
-| Durée du pipeline CI | 5 | à mesurer |
+| Durée du pipeline CI | 5 | à mesurer (dépôt GitHub requis) |
 | Délai entre le push et la nouvelle version disponible | 6 | à mesurer |
 | Temps de rollback (GitOps et Deployment) | 6 | à mesurer |
 | Temps de détection d'une panne | 7 | à mesurer |

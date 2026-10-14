@@ -1,0 +1,4 @@
+# Configuration ansible-lint (identique en local et en CI)
+profile: production
+exclude_paths:
+  - collections/       # collections tierces installées depuis requirements.yml

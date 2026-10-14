@@ -45,3 +45,6 @@ reports/
 .idea/
 *.swp
 .DS_Store
+
+# --- Ansible : collections installées depuis requirements.yml ---
+infra/ansible/collections/

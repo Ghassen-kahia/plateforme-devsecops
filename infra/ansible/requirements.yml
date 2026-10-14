@@ -1,0 +1,8 @@
+# Collections Ansible utilisées par les rôles — versions figées (reproductibilité).
+# Compatibles avec ansible-core >= 2.16 (Ubuntu 24.04 en local, ansible-core récent en CI).
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.posix          # module sysctl
+    version: "2.2.2"
+  - name: community.general      # module ufw
+    version: "11.4.9"

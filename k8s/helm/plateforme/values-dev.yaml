@@ -1,7 +1,0 @@
-# Environnement dev : une réplique, ressources réduites
-ingress:
-  host: dev.plateforme.local
-api:
-  logLevel: DEBUG
-database:
-  storage: 512Mi

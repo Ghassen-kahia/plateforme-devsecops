@@ -128,3 +128,20 @@ Pas de TLS sur l'Ingress local (perspective : cert-manager).
 
 Mécanisme : `.trivyignore.yaml`, exception limitée à **une règle et un fichier**, avec justification et
 expiration. Après la date, la règle redevient active et doit être réévaluée.
+
+## 7. Pipeline CI et chaîne d'approvisionnement
+
+| Contrôle | Outil | Bloquant | Périmètre |
+|---|---|---|---|
+| Secrets | Gitleaks 8.30.1 | Oui (tout constat) | Tout l'historique Git |
+| SAST | Semgrep 1.178.0 | Oui (tout constat) | Python, JS, Dockerfile, secrets |
+| SCA (dépendances) | Trivy fs | Oui (HIGH/CRITICAL corrigeables) | `requirements.txt` |
+| IaC | Trivy config, terraform validate, helm lint, ansible-lint | Oui | Terraform, chart rendu, Dockerfiles, rôles |
+| Image | Trivy image | Oui (HIGH/CRITICAL corrigeables) | Paquets OS et Python de l'image |
+| SBOM | Trivy (CycloneDX) | Non (artefact) | Inventaire des composants de l'image |
+
+- Permissions GitHub : `{}` par défaut ; écriture uniquement pour la publication GHCR et le commit GitOps.
+- Actions épinglées par SHA ; outils installés avec SHA-256 vérifiée ; versions avec ≥ 2 semaines de recul.
+- Aucun secret GitHub nécessaire pour le pipeline (GHCR et commit GitOps via `GITHUB_TOKEN` éphémère).
+- Base PostgreSQL de test : authentification `trust`, conteneur éphémère interne au runner (aucun
+  mot de passe factice dans le dépôt).
