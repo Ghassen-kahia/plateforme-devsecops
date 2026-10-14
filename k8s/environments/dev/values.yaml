@@ -3,7 +3,7 @@
 # commit sur main : ne pas le modifier à la main.
 image:
   registry: "ghcr.io/ghassen-kahia"
-  tag: "sha-cfd975c93e05"
+  tag: "sha-de536946e783"
 ingress:
   host: dev.plateforme.local
 api:
