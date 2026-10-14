@@ -105,6 +105,20 @@ historique() {
   fi
 }
 
+# Push robuste : la CI pousse elle aussi sur main (commits GitOps « chore(gitops) »).
+# Sans rebase, un push concurrent est refusé et la démonstration resterait bloquée en panne
+# (constaté : le revert avait été rejeté, dev est resté indisponible).
+pousser() {
+  local essai
+  for essai in 1 2 3 4 5; do
+    git push -q origin main && return 0
+    info "push refusé (commit concurrent de la CI), rebase puis nouvel essai ($essai/5)"
+    git pull -q --rebase origin main
+    sleep 3
+  done
+  ko "push impossible après 5 essais"; return 1
+}
+
 etat_ligne() {
   local db code
   db=$(kubectl -n plateforme-dev get pod plateforme-dev-db-0 -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo absente)
@@ -143,14 +157,16 @@ panne() {
   titre "1. Panne : arrêt de PostgreSQL en dev, via un commit Git"
   sed -i 's/^database:$/database:\n  # PANNE CONTRÔLÉE (demo.sh) — annulée par git revert\n  replicas: 0/' "$f"
   git commit -qam "chore(gitops): panne contrôlée (demo.sh) - arrêt de PostgreSQL en dev"
-  git push -q origin main; t1=$(date +%s)
+  pousser; t1=$(date +%s)
   info "commit $(git log --format=%h -1) poussé — Argo CD l'appliquera sous 60 s"
   suivre "PlateformeApiIndisponible.*PlateformeBaseDeDonneesIndisponible|PlateformeBaseDeDonneesIndisponible.*PlateformeApiIndisponible" 600 "$t1"
   ok "Panne détectée : alertes reçues par Alertmanager $(( $(date +%s) - t1 )) s après le push"
 
   titre "2. Retour à la normale : git revert"
-  git revert --no-edit HEAD >/dev/null
-  git push -q origin main; t2=$(date +%s)
+  # Revert du commit de panne lui-même (HEAD peut être un commit de la CI après un rebase)
+  git pull -q --rebase origin main
+  git revert --no-edit "$(git log --format=%H --grep='panne contrôlée (demo.sh)' -1)" >/dev/null
+  pousser; t2=$(date +%s)
   suivre "base prête=true \| HTTP=200" 600 "$t2"
   ok "Service rétabli $(( $(date +%s) - t2 )) s après le revert"
   suivre "alertes=aucune" 900 "$t2"
