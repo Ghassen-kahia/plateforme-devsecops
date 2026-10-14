@@ -1,9 +1,8 @@
 # État désiré de l'environnement prod — source de vérité GitOps.
 # Promotion : le tag validé en dev est recopié ici par le workflow « promote » (déclenchement manuel).
 image:
-  registry: ""
-  tag: "0.1.0"
-
+  registry: "ghcr.io/ghassen-kahia"
+  tag: "sha-99ed335406e1"
 ingress:
   host: plateforme.local
 api:
@@ -13,7 +12,6 @@ api:
     maxReplicas: 4
 frontend:
   replicas: 2
-
 database:
   # Mot de passe chiffré (kubeseal, portée strict : plateforme-db / plateforme-prod).
   # Re-chiffrer : voir docs/securite.md (section Sealed Secrets)
