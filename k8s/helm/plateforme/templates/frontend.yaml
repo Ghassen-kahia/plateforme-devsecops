@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "plateforme.frontendName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.updateStrategy.maxSurge }}
+      maxUnavailable: {{ .Values.updateStrategy.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "plateforme.selector" (dict "root" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "plateforme.labels" . | nindent 8 }}
+        {{- include "plateforme.selector" (dict "root" . "component" "frontend") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "plateforme.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: {{ .Values.frontend.runAsUser }}
+        runAsGroup: {{ .Values.frontend.runAsUser }}
+      containers:
+        - name: frontend
+          image: {{ include "plateforme.image" (dict "root" . "name" .Values.frontend.name) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+          env:
+            - name: BACKEND_HOST
+              value: {{ include "plateforme.apiName" . }}
+            - name: BACKEND_PORT
+              value: {{ .Values.api.port | quote }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # Nginx doit écrire : PID et fichiers temporaires, cache, configuration générée (envsubst)
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: confd, mountPath: /etc/nginx/conf.d }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+        - { name: cache, emptyDir: { sizeLimit: 32Mi } }
+        - { name: confd, emptyDir: { sizeLimit: 1Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "plateforme.frontendName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "plateforme.selector" (dict "root" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -3,7 +3,7 @@
 Projet personnel de portfolio : une chaîne DevSecOps complète, locale et reproductible.
 GitHub Actions → scans de sécurité → GHCR → Argo CD → k3s, avec une supervision Prometheus/Grafana.
 
-> 🚧 Projet en cours de construction. Phases 0 à 3 terminées.
+> 🚧 Projet en cours de construction. Phases 0 à 4 terminées.
 > Le détail des phases et l'état réel sont dans [`CLAUDE.md`](CLAUDE.md).
 
 ## Prérequis (Phase 0)

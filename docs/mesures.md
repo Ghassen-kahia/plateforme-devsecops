@@ -122,14 +122,83 @@ ses limites. Aucune valeur estimée ne figure dans les tableaux de résultats.
   (quotas, disponibilité des AMI, permissions IAM). Le mode `--check` d'Ansible ne simule pas les
   tâches `command` (installation de k3s), qui seront validées par l'exécution réelle en Phase 4.
 
+## M5 — Kubernetes : installation, déploiement manuel, résilience (Phase 4)
+
+- **Date** : 2026-10-14 — k3s v1.36.5+k3s1, Helm 4.3.0, VM 2 vCPU / 11 GiB.
+
+### Installation et socle
+
+| Mesure | Méthode | Résultat |
+|---|---|---|
+| Installation k3s + durcissement hôte (1er passage Ansible) | `date +%s` autour d'`ansible-playbook` | 66 s, ok=21 changed=12 failed=0 |
+| Idempotence Ansible (après correctifs) | 3e passage | changed=0 |
+| Socle Terraform local | `terraform apply` puis `plan -detailed-exitcode` | 8 ressources créées ; 2e plan : 0 changement |
+
+### Déploiement manuel (protocole : commandes enchaînées, horodatage `date +%s.%N` entre étapes)
+
+| Étape | dev (1er déploiement, image PostgreSQL à télécharger) | prod (images présentes) |
+|---|---|---|
+| Build des 2 images | 16,0 s | — |
+| Import dans containerd de k3s | 4,0 s | — |
+| Création du Secret | 0,1 s | < 1 s |
+| `helm upgrade --install --wait` | 64,0 s | 13,8 s |
+| **Total** | **84,1 s** | **13,8 s** (hors build/import) |
+
+Limite : mesure d'un opérateur qui connaît déjà les commandes, sans compter le temps de saisie ni les
+erreurs humaines (qui sont justement le risque du déploiement manuel).
+
+### Résilience et rollback
+
+| Scénario | Résultat observé |
+|---|---|
+| Arrêt de PostgreSQL : délai avant retrait de l'API du Service (readiness) | 8 s |
+| Arrêt de PostgreSQL : redémarrages de l'API pendant 25 s (liveness) | 0 |
+| Retour de PostgreSQL → API de nouveau Ready | 5 s (+ < 1 s de propagation des endpoints) |
+| Release défectueuse (image inexistante) : détection de l'échec par `helm --wait` | 45–46 s (= timeout configuré) |
+| Rollback Helm (`helm rollback --wait`) | 0,6 s à 2,5 s (4 mesures) |
+| Erreurs utilisateur pendant release défectueuse + rollback, **avant** correctif du chart | 10 × 502 sur 99 requêtes |
+| Idem **après** correctif, depuis un état stable (2 essais) | **0 erreur** sur 365 requêtes |
+
+### Sécurité vérifiée
+
+| Contrôle | Résultat |
+|---|---|
+| Pod non conforme dans un namespace `restricted` (`--dry-run=server`) | Refusé, 4 violations listées |
+| UID des conteneurs | API 10001, frontend 10101, PostgreSQL 10070 |
+| Jeton de ServiceAccount monté | Aucun (3/3 pods) |
+| Rootfs en lecture seule | 3/3 pods |
+| Matrice NetworkPolicy (7 flux) | 7/7 conformes |
+| Contrôle positif NetworkPolicy | Autre namespace → db : AUTORISÉ sans policy, BLOQUÉ avec |
+| Trivy sur le chart (avant → après) | 3 LOW KSV-0110 + 4 LOW KSV-0020/21 + 1 MEDIUM (faux positif) → 0 (1 exception datée) |
+
+### Autoscaling et quotas
+
+| Mesure | Résultat |
+|---|---|
+| HPA : charge 24 clients en parallèle pendant 180 s via l'Ingress | 2 → 4 répliques en ≈ 34 s (CPU max 310 % des requests) |
+| CPU à 4 répliques (nœud saturé) | ≈ 165–169 % des requests |
+| Retour à 2 répliques après la charge | 121 s (fenêtre de stabilisation 120 s) |
+| ResourceQuota dev : 20 répliques demandées | 2 créées (limite `limits.cpu` = 2) |
+
+### Consommation (au repos, 2 environnements + système k3s)
+
+| Mesure | Valeur |
+|---|---|
+| Nœud (`kubectl top node`) | 197m CPU (9 %), 3 838 Mi |
+| RAM VM (`free -h`) | 3,9 Gi utilisés, 7,1 Gi disponibles |
+| Pod API / frontend / PostgreSQL | ≈ 50 Mi / 3 Mi / 27–70 Mi |
+
+- **Limites** : un seul nœud (pas de test de perte de nœud) ; charge générée depuis la VM elle-même
+  (le générateur consomme aussi du CPU) ; mesures ponctuelles, non moyennées sur plusieurs runs.
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
 |---|---|---|
 | Résultats des tests automatisés | 1, 5 | Phase 1 mesurée (M2) ; CI à mesurer |
 | Vulnérabilités avant/après correction, par sévérité | 2 | mesuré (M3) |
-| Temps de déploiement manuel (Helm) | 4 | à mesurer |
-| Consommation CPU/RAM du cluster | 4, 6, 7 | à mesurer |
+| Temps de déploiement manuel (Helm) | 4 | mesuré (M5) |
+| Consommation CPU/RAM du cluster | 4, 6, 7 | Phase 4 mesurée (M5) |
 | Durée du pipeline CI | 5 | à mesurer |
 | Délai entre le push et la nouvelle version disponible | 6 | à mesurer |
 | Temps de rollback (GitOps et Deployment) | 6 | à mesurer |

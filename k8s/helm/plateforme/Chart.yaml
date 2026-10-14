@@ -1,0 +1,11 @@
+apiVersion: v2
+name: plateforme
+description: Application de démonstration de la plateforme DevSecOps (API FastAPI, frontend Nginx, PostgreSQL)
+type: application
+# Version du chart (packaging) : incrémentée quand les templates changent
+version: 0.1.0
+# Version de l'application déployée par défaut (surchargée par image.tag en CI/GitOps)
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+maintainers:
+  - name: Ghassen KAHIA

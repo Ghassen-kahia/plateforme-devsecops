@@ -7,7 +7,12 @@ exit-code: 1            # toute vulnérabilité retenue fait échouer la command
 vulnerability:
   ignore-unfixed: true  # sans correctif publié : non bloquant, mais tracé dans les rapports complets
 scan:
+  # Dépendances téléchargées (venv Python, providers Terraform) : pas le code du projet
+  skip-dirs:
+    - .venv
+    - "**/.terraform"
   scanners:
     - vuln
     - secret
     - misconfig
+ignorefile: .trivyignore.yaml

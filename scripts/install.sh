@@ -6,6 +6,7 @@
 #   sudo bash scripts/install.sh base      # Phase 0 : Docker Engine + Compose, Python venv
 #   sudo bash scripts/install.sh scan      # Phase 2 : Trivy (scan d'images, IaC, secrets)
 #   sudo bash scripts/install.sh iac       # Phase 3 : Terraform, Ansible, ansible-lint
+#   sudo bash scripts/install.sh k8s       # Phase 4 : kubectl (version alignée sur k3s), Helm
 #   sudo bash scripts/install.sh check     # Vérification (sans sudo possible)
 #
 # Principes :
@@ -104,6 +105,20 @@ install_iac() {
   apt-get install -y -q ansible ansible-lint
 }
 
+# Branche mineure de Kubernetes alignée sur k3s (kubectl supporte ±1 version mineure)
+KUBE_MINOR="v1.36"
+
+install_k8s_tools() {
+  log "Installation de kubectl ${KUBE_MINOR} (dépôt officiel pkgs.k8s.io)"
+  add_apt_repo kubernetes "https://pkgs.k8s.io/core:/stable:/${KUBE_MINOR}/deb/Release.key" \
+    "https://pkgs.k8s.io/core:/stable:/${KUBE_MINOR}/deb/ /"
+  log "Installation de Helm (dépôt APT officiel du projet Helm)"
+  add_apt_repo helm https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
+    "https://packages.buildkite.com/helm-linux/helm-debian/any/ any main"
+  apt-get update -q
+  apt-get install -y -q kubectl helm
+}
+
 check() {
   log "Vérification des prérequis"
   local ok=0
@@ -134,11 +149,17 @@ case "${1:-}" in
     terraform version | head -1
     ansible --version | head -1
     ;;
+  k8s)
+    require_root
+    install_k8s_tools
+    kubectl version --client | head -1
+    helm version --short
+    ;;
   check)
     check
     ;;
   *)
-    echo "Usage : sudo bash $0 base|scan|iac  |  bash $0 check"
+    echo "Usage : sudo bash $0 base|scan|iac|k8s  |  bash $0 check"
     exit 2
     ;;
 esac

@@ -1,0 +1,29 @@
+{{- if .Values.api.autoscaling.enabled }}
+# HPA : ajuste le nombre de pods de l'API selon l'utilisation CPU (mesurée par metrics-server).
+# Le pourcentage est calculé par rapport aux *requests* CPU : elles doivent donc être définies.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "plateforme.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "plateforme.apiName" . }}
+  minReplicas: {{ .Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.api.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    # Réduction prudente : on attend 2 min de charge basse avant de retirer des pods (anti-oscillation)
+    scaleDown:
+      stabilizationWindowSeconds: 120
+{{- end }}

@@ -31,6 +31,7 @@ Toute la documentation et les explications sont **en français**.
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
 Installés en Phase 2 : Trivy 0.76.0.
+Installés en Phase 4 : k3s v1.36.5+k3s1 (Ansible), kubectl 1.36.5 (pkgs.k8s.io), Helm 4.3.0 (dépôt Helm).
 Installés en Phase 3 : Terraform 1.16.6 (dépôt HashiCorp), Ansible (core 2.16.3) et ansible-lint 6.17.2 (dépôts Ubuntu).
 Encore absents : kubectl, helm, k3s, terraform, ansible, trivy, gitleaks, semgrep, pandoc, marp, node.
 
@@ -63,6 +64,14 @@ app + PostgreSQL ≈ 0,3 GiB ; bureau GNOME ≈ 2 GiB. → RAM suffisante.
 CPU : 2 vCPU est juste. Stratégie : requests/limits partout, Prometheus rétention courte
 (ex. 24 h), composants inutiles désactivés (ex. Argo CD Dex/notifications), installation progressive.
 **Recommandation : passer la VM à 4 vCPU si possible** (gratuit, réglage VMware).
+
+## 4 bis. Accès local
+
+- dev : `http://dev.plateforme.local` ; prod : `http://plateforme.local` (Traefik sur 80).
+  Sans modifier /etc/hosts : `curl --resolve <hôte>:80:127.0.0.1 http://<hôte>/`.
+- Images locales importées dans k3s : `docker save … | sudo k3s ctr -n k8s.io images import -` (avant GHCR).
+- Secrets `plateforme-db` créés à la main dans chaque namespace (mot de passe aléatoire, non stocké).
+- Stack Compose arrêtée (`docker compose stop`), volume conservé.
 
 ## 5. Risques identifiés
 
@@ -118,8 +127,13 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] Module AWS (VPC, sous-réseau, SG, EC2, Flow Logs) : fmt, validate, Trivy OK — **jamais appliqué**
   - [x] Module local (namespaces, PSA, quotas, LimitRange) : validate OK — application en Phase 4
   - [x] Rôles Ansible common, ssh_hardening, firewall, k3s : lint production, `--check` OK
-  - [ ] (Phase 4) Exécution réelle d'Ansible (UFW, sysctl, k3s) et application de Terraform local
-- [ ] Phase 4 — Kubernetes et Helm (+ kubectl, helm)
+- [x] **Phase 4 — Kubernetes et Helm** (terminée le 2026-10-14)
+  - [x] Ansible exécuté : UFW actif, sysctl, k3s v1.36.5+k3s1 durci ; idempotent (changed=0)
+  - [x] kubectl 1.36.5 et Helm 4.3.0 (`install.sh k8s`) ; Terraform local appliqué (8 ressources, sans dérive)
+  - [x] Chart Helm `k8s/helm/plateforme` (api, frontend, PostgreSQL StatefulSet, Ingress, HPA, NetworkPolicy)
+  - [x] dev et prod déployés manuellement, temps mesurés
+  - [x] Probes, NetworkPolicy (contrôle positif), HPA, quota, release défectueuse et rollback testés
+  - [x] Incident 502 diagnostiqué et corrigé (label de version dans le pod PostgreSQL)
 - [ ] Phase 5 — Pipeline CI DevSecOps (+ gitleaks, semgrep en local ; token GitHub à ce moment)
 - [ ] Phase 6 — GitOps avec Argo CD
 - [ ] Phase 7 — Supervision
@@ -143,6 +157,10 @@ trivy config app/                    # Dockerfiles
 terraform fmt -recursive -check infra/terraform && terraform -chdir=infra/terraform/aws validate
 trivy config --config trivy.yaml infra/
 (cd infra/ansible && ansible-lint && ansible-playbook site.yml --check)
+helm lint k8s/helm/plateforme -f k8s/helm/plateforme/values-prod.yaml
+trivy config --config trivy.yaml .     # tout le dépôt (une seule cible)
+kubectl get pods -A ; kubectl -n plateforme-dev get pods,svc,ingress,netpol
+curl --resolve dev.plateforme.local:80:127.0.0.1 http://dev.plateforme.local/ready
 docker run --rm hello-world          # moteur Docker fonctionnel
 docker compose version
 git status
@@ -168,4 +186,9 @@ git status
 | 2026-10-14 | k3s installé par Ansible (script au tag + SHA-256), pas par `curl \| sh` | Reproductibilité et intégrité |
 | 2026-10-14 | k3s durci : secrets-encryption, protect-kernel-defaults, audit log | Guide de durcissement CIS de k3s |
 | 2026-10-14 | k3s v1.36.5+k3s1 (canal stable au 2026-10-14) | Version stable figée |
+| 2026-10-14 | PostgreSQL en StatefulSet maison (pas de chart Bitnami) | Images Bitnami gratuites restreintes depuis 2025 ; chart simple et maîtrisé |
+| 2026-10-14 | Secret de la base créé hors du chart (`existingSecret`) | Aucun secret dans les values ; Sealed Secrets en Phase 6 |
+| 2026-10-14 | Frontend relaie /api (une seule route Ingress) | Même topologie qu'en Compose, pas de CORS |
+| 2026-10-14 | UID > 10000 pour tous les conteneurs | Pas de collision avec les UID de l'hôte (KSV-0020/21) |
+| 2026-10-14 | Pas de label de version dans le modèle de pod PostgreSQL | Une release applicative ne doit pas redémarrer la base |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

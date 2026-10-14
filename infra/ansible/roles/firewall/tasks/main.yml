@@ -3,6 +3,16 @@
     name: ufw
     state: present
 
+# UFW applique son propre fichier sysctl à chaque activation/rechargement (IPT_SYSCTL) et
+# remettrait log_martians à 0, en contradiction avec le rôle common : on l'aligne.
+- name: Aligner les paramètres sysctl appliqués par UFW sur le durcissement
+  ansible.builtin.lineinfile:
+    path: /etc/ufw/sysctl.conf
+    regexp: "^net/ipv4/conf/{{ item }}/log_martians="
+    line: "net/ipv4/conf/{{ item }}/log_martians=1"
+  loop: [all, default]
+  notify: Recharger UFW
+
 # Règles d'autorisation posées AVANT l'activation, pour ne jamais couper un accès en cours
 - name: Autoriser SSH avec limitation de débit (anti force brute)
   community.general.ufw:

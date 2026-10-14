@@ -50,8 +50,27 @@
   environment:
     INSTALL_K3S_VERSION: "{{ k3s_version }}"
     INSTALL_K3S_SKIP_ENABLE: "false"
+    # Pas de liens kubectl/crictl vers le binaire k3s : utilisé par un non-root, `k3s kubectl`
+    # extrait ~250 Mo dans ~/.rancher. On utilise le kubectl officiel (scripts/install.sh k8s)
+    # et `sudo k3s crictl` pour le débogage du runtime.
+    INSTALL_K3S_SYMLINK: "skip"
   when: k3s_version not in (k3s_installed.stdout | default(''))
   changed_when: true
+
+- name: Lister les liens créés par une installation antérieure de k3s
+  ansible.builtin.stat:
+    path: "/usr/local/bin/{{ item }}"
+  loop: [kubectl, crictl, ctr]
+  register: k3s_symlinks
+
+- name: Retirer les liens kubectl/crictl/ctr pointant vers k3s
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ k3s_symlinks.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.islnk | default(false) and item.stat.lnk_target == 'k3s'
 
 - name: Attendre que le nœud soit Ready
   ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=180s

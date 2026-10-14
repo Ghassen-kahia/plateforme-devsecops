@@ -1,0 +1,89 @@
+# Valeurs par défaut du chart. Les fichiers values-<env>.yaml ne surchargent que les différences.
+
+# Paramètres communs aux images de l'application
+image:
+  registry: ""             # ex. ghcr.io/<utilisateur> ; vide = image locale importée dans k3s
+  tag: ""                  # vide = .Chart.AppVersion ; en GitOps : tag immuable (SHA du commit)
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Contexte de sécurité commun (conforme au niveau Pod Security « restricted »)
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+api:
+  name: plateforme-api
+  replicas: 1                # ignoré si l'autoscaling est activé
+  port: 8000
+  runAsUser: 10001
+  logLevel: INFO
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+  probes:
+    # Démarrage : jusqu'à 30 × 2 s pour démarrer avant que la liveness ne prenne le relais
+    startup:   { path: /health, periodSeconds: 2, failureThreshold: 30 }
+    # Vivacité : processus bloqué → redémarrage (ne dépend PAS de la base)
+    liveness:  { path: /health, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3 }
+    # Disponibilité : base injoignable → retrait du Service, sans redémarrage
+    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 2 }
+
+frontend:
+  name: plateforme-frontend
+  replicas: 1
+  port: 8080
+  # UID > 10000 : pas de collision avec un utilisateur de l'hôte (image compatible UID arbitraire)
+  runAsUser: 10101
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits:   { cpu: 100m, memory: 64Mi }
+
+database:
+  # Nom du Secret Kubernetes (créé HORS du chart) contenant la clé `password`.
+  # Phase 4 : kubectl create secret ; Phase 6 : SealedSecret versionné dans Git.
+  existingSecret: plateforme-db
+  name: plateforme
+  user: plateforme
+  port: 5432
+  image: postgres:18.6-alpine3.24
+  # UID > 10000 ; l'image officielle gère un UID arbitraire (nss_wrapper)
+  runAsUser: 10070
+  storage: 1Gi
+  storageClass: local-path    # fourni par k3s
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+ingress:
+  enabled: true
+  className: traefik
+  host: plateforme.local
+  tls: false                  # TLS : voir perspectives (cert-manager)
+
+# Mise à jour progressive : jamais moins de pods disponibles que demandé (maxUnavailable 0)
+updateStrategy:
+  maxSurge: 1
+  maxUnavailable: 0
+revisionHistoryLimit: 5
+
+networkPolicy:
+  enabled: true
+  # Namespace et labels du contrôleur Ingress autorisé à joindre le frontend
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  # Namespace autorisé à collecter /metrics sur l'API (Prometheus, Phase 7)
+  monitoringNamespace: monitoring

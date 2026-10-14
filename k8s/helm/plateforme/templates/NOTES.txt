@@ -1,0 +1,9 @@
+Release {{ .Release.Name }} déployée dans le namespace {{ .Release.Namespace }} (version {{ include "plateforme.tag" . }}).
+
+Vérifier :
+  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress{{ if .Values.api.autoscaling.enabled }},hpa{{ end }}
+  curl --resolve {{ .Values.ingress.host }}:80:127.0.0.1 http://{{ .Values.ingress.host }}/ready
+
+Historique et retour arrière :
+  helm -n {{ .Release.Namespace }} history {{ .Release.Name }}
+  helm -n {{ .Release.Namespace }} rollback {{ .Release.Name }} <REVISION>

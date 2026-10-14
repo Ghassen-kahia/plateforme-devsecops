@@ -408,3 +408,154 @@ suivante.
    CoreDNS tourne dans un pod. Le trafic des pods vers CoreDNS (réseau 10.42.0.0/16, service
    10.43.0.10) passe par la pile réseau de l'hôte, et UFW le rejette s'il n'est pas autorisé. D'où les
    règles explicites pour 10.42.0.0/16 et 10.43.0.0/16, issues de la documentation k3s.
+
+---
+
+## Phase 4 — Kubernetes (k3s) et Helm
+
+### Ce qu'installe k3s (et pourquoi c'est pratique ici)
+
+Un binaire unique (~80 Mo) qui embarque l'API server, le scheduler, le controller-manager, le kubelet,
+containerd, flannel (CNI), CoreDNS, Traefik (Ingress), ServiceLB (LoadBalancer sans cloud),
+local-path-provisioner (volumes), metrics-server (HPA) et un contrôleur de NetworkPolicy (kube-router).
+La base de données du cluster est SQLite par défaut (etcd possible en multi-nœuds).
+
+### Architecture déployée
+
+```
+          Traefik (kube-system) ──► Service frontend ──► Pods Nginx (UID 10101)
+Navigateur ─┘   Ingress host:                               │ /api
+           dev.plateforme.local / plateforme.local          ▼
+                                     Service api ──► Pods FastAPI (UID 10001) ──► Service db ──► StatefulSet PostgreSQL (UID 10070, PVC local-path)
+                                         ▲
+                     Prometheus (namespace monitoring, Phase 7) ── /metrics
+```
+
+Namespaces (Terraform) : `plateforme-dev` et `plateforme-prod` (PSA restricted, quotas), `argocd`
+(baseline) et `monitoring` (privileged, pour node-exporter).
+
+### Concepts clés démontrés
+
+**Pod Security Admission (PSA)** : un contrôleur d'admission intégré à Kubernetes, qui remplace les
+PodSecurityPolicy supprimées en 1.25. Le label de namespace `pod-security.kubernetes.io/enforce=restricted`
+fait refuser par l'API tout pod qui n'est pas non-root, sans `drop: ALL`, avec escalade de privilèges
+possible ou sans profil seccomp. Testé : un `nginx` standard est refusé avec la liste exacte des violations.
+
+**Requests vs limits** :
+- `requests` : ce que le scheduler **réserve** pour placer le pod. C'est aussi la base de calcul du % CPU du HPA.
+- `limits` : le plafond. Au-delà, le CPU est **bridé** (throttling) et la mémoire provoque un **OOMKill**.
+- `ResourceQuota` : plafond par namespace. Testé : 20 répliques demandées, 2 créées, car `limits.cpu`
+  est plafonné à 2 cœurs.
+- `LimitRange` : des valeurs par défaut pour les conteneurs qui n'en déclarent pas.
+
+**Les trois probes** :
+| Probe | Rôle | Testée |
+|---|---|---|
+| startupProbe | Laisse jusqu'à 60 s au démarrage avant d'activer la liveness | Démarrage nominal |
+| livenessProbe `/health` | Redémarre un processus bloqué | Base arrêtée → **0 redémarrage** en 25 s |
+| readinessProbe `/ready` | Retire le pod du Service | Base arrêtée → NotReady en 8 s ; reprise 5 s après le retour de la base |
+
+**NetworkPolicy** : modèle « deny-all » puis autorisations explicites. **Une NetworkPolicy n'a
+d'effet que si le CNI ou un contrôleur l'applique.** Flannel seul ne le fait pas ; k3s ajoute
+kube-router pour cela. Je l'ai prouvé avec un contrôle positif : le même flux (autre namespace →
+PostgreSQL) est AUTORISÉ sans policy et BLOQUÉ avec.
+
+**HPA** : il interroge metrics-server toutes les 15 s, puis calcule
+`désiré = ceil(actuel × utilisation / cible)`. La fenêtre de stabilisation de 120 s sur la réduction
+évite les oscillations. Testé : 2 → 4 répliques en ≈ 34 s sous charge, retour à 2 en 121 s.
+
+**Stratégie RollingUpdate `maxSurge: 1`, `maxUnavailable: 0`** : le nouveau pod doit être Ready
+**avant** qu'un ancien soit retiré. Une image cassée (ImagePullBackOff) n'interrompt donc pas le service.
+
+### Rollback : trois mécanismes à ne pas confondre
+
+| Mécanisme | Ce qu'il restaure | Ce qu'il NE restaure PAS | Usage |
+|---|---|---|---|
+| `kubectl rollout undo` | Le **modèle de pod** du Deployment (ReplicaSet précédent) | ConfigMap, Secret, Service, Ingress, HPA… et l'historique Helm | Urgence ponctuelle, hors outil de déploiement |
+| `helm rollback <rév>` | **Tous** les objets de la release, à l'état d'une révision | L'état de Git (si GitOps) ; les données (PVC) | Déploiements gérés par Helm |
+| Rollback GitOps (`git revert`, Phase 6) | L'**état désiré** dans Git, réappliqué par Argo CD | Les données | Source de vérité unique, avec historique et revue |
+
+**Démonstration réelle du piège** (LOG_LEVEL DEBUG → WARNING via Helm) :
+1. `kubectl rollout undo` : nouveau pod, mais `LOG_LEVEL=WARNING`, car la ConfigMap n'a pas été restaurée.
+2. `helm rollback` : la ConfigMap revient à DEBUG, mais **le pod n'est pas redémarré**. Le modèle de pod
+   (dont l'annotation de checksum) était déjà identique, à cause du `rollout undo`. On obtient un état incohérent.
+3. Correction : `kubectl rollout restart`.
+→ **Une modification manuelle d'un objet géré par un outil déclaratif crée une dérive.** C'est la
+motivation directe de GitOps et du *self-heal* d'Argo CD.
+
+### Incident analysé : 502 pendant une release défectueuse (méthode de diagnostic)
+
+1. **Symptôme** : 10 réponses 502 sur 99 pendant une release à image inexistante, alors que l'ancien pod
+   de l'API restait `Running`.
+2. **Corrélation** : les logs Nginx montrent `Connection refused` vers le ClusterIP de l'API pendant 5 s.
+   Le Service n'avait donc plus d'endpoint prêt.
+3. **Cause** : le label `app.kubernetes.io/version` (qui suit le tag de l'application) figurait dans le
+   **modèle de pod du StatefulSet PostgreSQL**. Chaque release modifiait ce modèle, PostgreSQL redémarrait,
+   et la readiness de l'API (qui teste la base) échouait. Preuve : l'événement `Killing` sur `db-0`.
+4. **Correction** : modèle de pod PostgreSQL sans label de version (`plateforme.dbPodLabels`). Vérifié par
+   un `diff` du rendu entre deux tags, qui est identique.
+5. **Nouvelle mesure biaisée** : 9 erreurs 502 au second essai. J'ai testé trois hypothèses (création de
+   pod, pod NotReady avec les labels de l'API, mise à jour des objets NetworkPolicy), toutes réfutées,
+   puis fait une bissection (release avec et sans NetworkPolicy) : 0 erreur dans les deux cas. La mesure
+   avait démarré 5 s après le correctif, qui avait lui-même redémarré PostgreSQL une dernière fois.
+6. **Résultat** : depuis un état stable, une release défectueuse suivie d'un rollback donne **0 erreur sur
+   plus de 360 requêtes**.
+
+### Commandes utiles
+
+```bash
+kubectl get pods -A -o wide                    # vue d'ensemble
+kubectl -n plateforme-dev describe pod <pod>   # événements : probes, pull d'image, quota
+kubectl -n plateforme-dev logs deploy/plateforme-dev-api
+kubectl top nodes; kubectl top pods -A         # metrics-server
+kubectl get events -n plateforme-dev --sort-by=.lastTimestamp
+helm lint k8s/helm/plateforme -f k8s/helm/plateforme/values-dev.yaml
+helm template t k8s/helm/plateforme | less     # rendu sans installer
+helm -n plateforme-dev history plateforme-dev
+helm -n plateforme-dev rollback plateforme-dev <rév> --wait
+docker save img:tag | sudo k3s ctr -n k8s.io images import -   # image locale → containerd de k3s
+curl --resolve dev.plateforme.local:80:127.0.0.1 http://dev.plateforme.local/ready
+```
+
+### Erreurs rencontrées — Phase 4
+
+| Problème | Cause | Solution |
+|---|---|---|
+| Ansible non idempotent (`changed=1` sur `log_martians`) | UFW applique `/etc/ufw/sysctl.conf` (log_martians=0) à chaque activation | Rôle firewall : alignement de ce fichier, handler `ufw reload` |
+| `kubectl` en utilisateur : avertissements et 253 Mo dans `~/.rancher` | `/usr/local/bin/kubectl` était un lien vers le binaire k3s | kubectl officiel (pkgs.k8s.io), `INSTALL_K3S_SYMLINK=skip`, liens retirés par Ansible |
+| `trivy config k8s/ app/ infra/` → « multiple targets » | Trivy n'accepte qu'une seule cible | Scan de `.` avec `skip-dirs` |
+| Exception Trivy KSV-01010 sans effet | Chemins relatifs à la cible scannée | Scan depuis la racine du dépôt |
+| 61 blocages UFW (ICMPv6 ff02::2, ff02::16) | Multicast IPv6 automatique des interfaces de pods | Sans conséquence (cluster IPv4) ; règles non élargies |
+| 502 pendant une release | Label de version dans le modèle de pod PostgreSQL | Voir l'incident ci-dessus |
+| État incohérent après `rollout undo` + `helm rollback` | Modification hors de Helm | `rollout restart` ; règle : ne pas modifier à la main |
+
+### Questions d'entretien — Phase 4
+
+1. **Quelle différence entre liveness et readiness ? Donnez un exemple de mauvaise configuration.**
+   Voir le tableau des probes. Mauvaise configuration typique : tester la base de données dans la
+   liveness. Une panne de base provoque alors des redémarrages en boucle de tous les pods de l'API,
+   qui aggravent l'incident (thundering herd au retour de la base). Je l'ai mesuré : avec ma
+   configuration, une base arrêtée donne 0 redémarrage et une reprise en 5 s.
+2. **Comment vérifiez-vous que vos NetworkPolicy fonctionnent vraiment ?**
+   Avec une matrice de tests (flux autorisés ET interdits), puis un **contrôle positif** : désactiver
+   les policies et constater que le flux interdit passe. Sans ce contrôle, « bloqué » peut venir d'une
+   autre cause (DNS, outil absent, service arrêté). Je vérifie aussi que le CNI les applique : sur k3s,
+   c'est kube-router ; avec flannel seul, elles seraient ignorées sans aucun message d'erreur.
+3. **`kubectl rollout undo` vs `helm rollback` : lequel utiliser ?**
+   Voir le tableau. En environnement géré par Helm (ou par GitOps), il ne faut jamais utiliser
+   `rollout undo`. Il ne restaure que le modèle de pod et désynchronise l'outil. Je l'ai démontré :
+   on obtient un pod en WARNING face à une ConfigMap en DEBUG.
+4. **Pourquoi PostgreSQL dans un StatefulSet et pas un Deployment ?**
+   Pour une identité stable (`db-0`), un volume dédié par réplique (`volumeClaimTemplates`) qui suit le
+   pod, et un ordre de démarrage et d'arrêt garanti. Limite : sans opérateur, aucune réplication, ni
+   sauvegarde, ni basculement. En production : RDS ou CloudNativePG.
+5. **(Dépannage)** **Des 502 apparaissent pendant un déploiement alors que vos pods sont Running. Votre démarche ?**
+   Voir l'incident ci-dessus : corréler les horodatages (client, logs Nginx, événements Kubernetes),
+   vérifier les endpoints du Service, identifier ce qui a redémarré (`kubectl get events`, UID des pods),
+   formuler une hypothèse et la tester isolément, puis faire une bissection. **Et se méfier de ses propres
+   mesures** : la deuxième série d'erreurs était un artefact de ma méthode.
+6. **(Compromis)** **HPA sur 2 vCPU : est-ce utile ?**
+   Le HPA a fonctionné (2 → 4 en 34 s), mais le CPU est resté à ≈ 167 % des requests à 4 répliques : le
+   nœud était saturé. L'autoscaling horizontal n'a de sens que si des ressources sont disponibles. En
+   production, il est couplé au Cluster Autoscaler ou à Karpenter, qui ajoutent des nœuds. Ici, il
+   démontre le mécanisme et protège contre les pics modérés.

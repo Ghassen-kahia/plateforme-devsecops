@@ -1,0 +1,123 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $sel := dict "root" . }}
+# Modèle « zéro confiance » : tout est interdit dans le namespace, puis chaque flux nécessaire est
+# autorisé explicitement. Appliqué par le contrôleur de NetworkPolicy intégré à k3s (kube-router).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "plateforme.fullname" . }}-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Tous les pods de la release peuvent résoudre des noms DNS (CoreDNS dans kube-system)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "plateforme.fullname" . }}-allow-dns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Frontend : entrées depuis Traefik uniquement ; sorties vers l'API uniquement
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "plateforme.frontendName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "plateforme.selector" (dict "root" . "component" "frontend") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.frontend.port }} }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "plateforme.selector" (dict "root" . "component" "api") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.api.port }} }
+---
+# API : entrées depuis le frontend et Prometheus ; sorties vers PostgreSQL uniquement
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "plateforme.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "plateforme.selector" (dict "root" . "component" "api") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "plateforme.selector" (dict "root" . "component" "frontend") | nindent 14 }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.api.port }} }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "plateforme.selector" (dict "root" . "component" "database") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.database.port }} }
+---
+# PostgreSQL : entrées depuis l'API uniquement ; aucune sortie
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "plateforme.dbName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "plateforme.selector" (dict "root" . "component" "database") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "plateforme.selector" (dict "root" . "component" "api") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.database.port }} }
+{{- end }}

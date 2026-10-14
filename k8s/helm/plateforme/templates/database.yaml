@@ -1,0 +1,93 @@
+# PostgreSQL en StatefulSet : identité stable (plateforme-db-0) et volume persistant dédié.
+# En production, on préférerait un service managé (RDS) ou un opérateur (CloudNativePG)
+# pour les sauvegardes, la réplication et le basculement automatiques.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "plateforme.dbName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  serviceName: {{ include "plateforme.dbName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "plateforme.selector" (dict "root" . "component" "database") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "plateforme.dbPodLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "plateforme.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        # Exécution directe en tant que postgres (UID 70) : l'entrypoint saute l'étape root
+        runAsUser: {{ .Values.database.runAsUser }}
+        runAsGroup: {{ .Values.database.runAsUser }}
+        fsGroup: {{ .Values.database.runAsUser }}
+      containers:
+        - name: postgres
+          image: {{ .Values.database.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.database.port }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.database.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: password
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: run, emptyDir: { sizeLimit: 1Mi } }
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.database.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.database.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "plateforme.dbName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "plateforme.selector" (dict "root" . "component" "database") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.database.port }}
+      targetPort: postgres

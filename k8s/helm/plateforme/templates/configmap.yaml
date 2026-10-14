@@ -1,0 +1,15 @@
+# Configuration non sensible de l'API. Le mot de passe est dans un Secret séparé.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "plateforme.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+data:
+  APP_VERSION: {{ include "plateforme.tag" . | quote }}
+  LOG_LEVEL: {{ .Values.api.logLevel | quote }}
+  DB_HOST: {{ include "plateforme.dbName" . | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ .Values.database.name | quote }}
+  DB_USER: {{ .Values.database.user | quote }}

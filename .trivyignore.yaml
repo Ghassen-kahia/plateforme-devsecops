@@ -1,0 +1,10 @@
+# Exceptions Trivy — chacune ciblée (règle + fichier), justifiée et datée.
+# Politique : docs/securite.md. Revue obligatoire avant la date d'expiration.
+misconfigurations:
+  - id: KSV-01010
+    paths:
+      - "k8s/helm/plateforme/templates/configmap.yaml"
+    statement: >-
+      Faux positif : heuristique sur les noms de clés (DB_PORT, LOG_LEVEL). La ConfigMap ne contient
+      que de la configuration non sensible ; le mot de passe est injecté depuis un Secret (secretKeyRef).
+    expired_at: 2027-04-14

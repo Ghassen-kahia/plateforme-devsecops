@@ -102,3 +102,29 @@ AIDE, AppArmor personnalisé, politique de mots de passe PAM, désactivation des
 inutilisés, benchmark CIS complet avec un outil de conformité (kube-bench, Lynis, OpenSCAP). Ces
 mesures sont pertinentes pour un serveur de production, mais disproportionnées ou risquées pour une
 VM de bureau partagée avec l'environnement graphique.
+
+## 6. Kubernetes
+
+| Mesure | Implémentation | Vérification |
+|---|---|---|
+| Pod Security Admission | `restricted` sur les namespaces applicatifs (Terraform) | Pod non conforme refusé |
+| securityContext | non-root, UID > 10000, `drop: ALL`, `allowPrivilegeEscalation: false`, seccomp RuntimeDefault, rootfs en lecture seule | `id`, `touch /` |
+| Jeton d'API | `automountServiceAccountToken: false`, ServiceAccount dédié | `/var/run/secrets/kubernetes.io` absent |
+| Réseau | NetworkPolicy deny-all + flux explicites (DNS, Traefik→frontend, frontend→api, monitoring→api, api→db) | Matrice de 7 flux + contrôle positif |
+| Ressources | requests/limits sur chaque conteneur, ResourceQuota et LimitRange par namespace | Quota : 20 répliques demandées, 2 créées |
+| Secrets | Secret créé hors du chart (`existingSecret`), mot de passe généré, jamais affiché ; chiffré au repos par k3s (`secrets-encryption`) | `helm get values` ne contient aucun secret |
+| Secrets dans Git | **Pas encore** : Sealed Secrets prévu en Phase 6 | — |
+
+**Limites** : un Secret Kubernetes n'est qu'encodé en Base64 dans les manifestes, ce qui **n'est pas un chiffrement**.
+Le chiffrement au repos de k3s protège la base de données du cluster, pas l'accès via l'API : toute
+personne autorisée à lire les Secrets du namespace (RBAC) voit le mot de passe en clair.
+Pas de TLS sur l'Ingress local (perspective : cert-manager).
+
+### Exceptions Kubernetes
+
+| Règle | Fichier | Justification | Expiration |
+|---|---|---|---|
+| KSV-01010 (MEDIUM) | `templates/configmap.yaml` | Faux positif sur les noms de clés `DB_PORT`, `LOG_LEVEL` ; aucune donnée sensible | 2027-04-14 |
+
+Mécanisme : `.trivyignore.yaml`, exception limitée à **une règle et un fichier**, avec justification et
+expiration. Après la date, la règle redevient active et doit être réévaluée.
