@@ -639,6 +639,39 @@ Supprimer le fichier dans un nouveau commit ne sert à rien : le secret reste da
 | actionlint « OK » sans analyser les scripts | shellcheck absent | shellcheck installé ; SC2015 corrigé dans install.sh |
 | Trivy local en 0.76.0 (publiée le jour même) | Paquet APT flottant | Binaire 0.74.0 figé, SHA-256 vérifiée ; tous les contrôles revalidés |
 
+### Résultats sur GitHub
+
+- Dépôt public : https://github.com/Ghassen-kahia/plateforme-devsecops
+- Premier pipeline : 7 jobs verts en 141 s, images `ghcr.io/ghassen-kahia/plateforme-{api,frontend}:sha-…`
+  publiées, commit GitOps automatique `chore(gitops): déployer sha-… en dev`.
+- Les images d'un dépôt public sont publiques sur GHCR : k3s les télécharge sans secret (vérifié par
+  un accès anonyme au manifeste, HTTP 200).
+- PR #1 (secret factice) : bloquée par **Gitleaks seul**, valeur `REDACTED` dans les logs.
+- PR #2 (pyyaml 5.3.1) : bloquée par **Trivy fs seul** (CVE-2020-14343).
+- Dans les deux cas, les jobs d'image et GitOps sont `skipped` : rien n'est publié.
+
+### Incident : une PR propre bloquée par le secret d'une autre branche
+
+**Symptôme** : la PR #2 (sans secret) échouait aussi sur Gitleaks.
+**Cause** : `actions/checkout` avec `fetch-depth: 0` récupère **toutes les branches**, et
+`gitleaks git` analyse par défaut `git log --all`. Le secret de la branche de la PR #1 était donc
+reproché à la PR #2.
+**Correction** : périmètre selon l'événement (`--log-opts`) : `base..head` pour une PR, l'historique
+de la branche pour un push, `--all` dans un **scan hebdomadaire planifié**. Ce dernier rattrape aussi
+un secret poussé sur une branche sans PR. Vérifié : chaque PR n'est plus bloquée que par son propre contrôle.
+**Leçon** : un contrôle qui accuse le mauvais coupable est presque aussi nuisible qu'un contrôle
+absent, car l'équipe finit par l'ignorer.
+
+### Limite assumée : la PR reste techniquement fusionnable
+
+Le pipeline échoue et GitHub affiche la croix rouge, mais **sans règle de protection de branche**
+exigeant les checks, le bouton de fusion reste disponible. Je ne l'ai pas activée, car la CI pousse
+directement le commit GitOps sur `main` : une règle « checks obligatoires » rejetterait ce push.
+Solutions en équipe :
+1. **Dépôt GitOps séparé**, mis à jour par une deploy key ou une GitHub App. `main` du dépôt applicatif
+   peut alors être entièrement protégé (PR obligatoire + checks requis). C'est la cible recommandée.
+2. Ruleset avec contournement autorisé pour l'identité de la CI.
+
 ### Questions d'entretien — Phase 5
 
 1. **Pourquoi épingler les actions par SHA plutôt que par tag ?**
@@ -663,6 +696,13 @@ Supprimer le fichier dans un nouveau commit ne sert à rien : le secret reste da
 5. **(Compromis)** **Pourquoi des vulnérabilités sans correctif ne bloquent-elles pas le pipeline ?**
    Voir la Phase 2 : bloquer ce qui est corrigeable, tracer le reste (rapport JSON et SBOM en artefact),
    et reconstruire régulièrement. Sinon, l'équipe finit par désactiver le contrôle.
+7. **(Dépannage)** **Une PR sans secret échoue sur Gitleaks. Que vérifiez-vous ?**
+   Le commit et le fichier signalés : s'ils n'appartiennent pas à la PR, c'est le périmètre du scan qui
+   est en cause. Cas réel : `fetch-depth: 0` + `gitleaks git` (`--all`) analysaient les autres branches.
+   Correction : `--log-opts base..head` sur les PR et scan complet planifié chaque semaine.
+8. **Vos PR en échec peuvent-elles quand même être fusionnées ?**
+   Oui, tant qu'aucune protection de branche n'exige les checks. C'est une limite que j'assume et
+   que je documente (voir ci-dessus). La cible est un dépôt GitOps séparé, avec `main` protégé.
 6. **(Dépannage)** **Le job ansible-lint échoue en CI alors qu'il passe en local. Pourquoi ?**
    Cas réel : la version locale (Ubuntu) embarquait implicitement les collections, alors que la
    version pip de la CI ne les avait pas. Il fallait déclarer la dépendance cachée dans

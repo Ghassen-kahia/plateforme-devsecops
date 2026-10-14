@@ -207,6 +207,27 @@ erreurs humaines (qui sont justement le risque du déploiement manuel).
 - **Limites** : répétition locale ; le comportement réel dans GitHub Actions (durées, blocage effectif
   d'une PR) sera mesuré après la publication du dépôt.
 
+## M7 — Pipeline CI réel sur GitHub Actions (Phase 5)
+
+- **Date** : 2026-10-14 — runners `ubuntu-24.04` hébergés par GitHub, dépôt public.
+- **Méthode** : `gh run view --json createdAt,updatedAt,jobs` (durées calculées par GitHub).
+
+| Run | Événement | Résultat | Durée totale |
+|---|---|---|---|
+| 38599334789 | push main (premier pipeline, cache vide) | succès, 7/7 jobs | **141 s** |
+| 38600037068 | push main (correctif Gitleaks) | succès, 7/7 jobs | **143 s** |
+| 38599765397 / 38600455805 | PR #1 secret factice | **échec : Gitleaks** ; image et GitOps sautés | — |
+| 38600053198 | PR #2 pyyaml 5.3.1 | **échec : Trivy fs** (CVE-2020-14343) ; image et GitOps sautés | — |
+
+Durées des jobs du premier run : Gitleaks 9 s, Semgrep 25 s, lint/tests 40 s, IaC 41 s,
+image frontend 56 s, image API 81 s, mise à jour GitOps 6 s.
+
+**Délai push → nouvel état désiré dans Git** : ≈ 141 s (fin du job update-gitops). Le délai jusqu'à
+la disponibilité dans le cluster sera mesuré avec Argo CD (Phase 6).
+
+- **Limites** : 2 runs seulement ; les durées varient selon la charge des runners GitHub et l'état du
+  cache (pip, couches Docker `type=gha`).
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
@@ -215,7 +236,7 @@ erreurs humaines (qui sont justement le risque du déploiement manuel).
 | Vulnérabilités avant/après correction, par sévérité | 2 | mesuré (M3) |
 | Temps de déploiement manuel (Helm) | 4 | mesuré (M5) |
 | Consommation CPU/RAM du cluster | 4, 6, 7 | Phase 4 mesurée (M5) |
-| Durée du pipeline CI | 5 | à mesurer (dépôt GitHub requis) |
+| Durée du pipeline CI | 5 | mesuré (M7) |
 | Délai entre le push et la nouvelle version disponible | 6 | à mesurer |
 | Temps de rollback (GitOps et Deployment) | 6 | à mesurer |
 | Temps de détection d'une panne | 7 | à mesurer |

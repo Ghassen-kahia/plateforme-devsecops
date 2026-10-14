@@ -66,6 +66,14 @@ CPU : 2 vCPU est juste. Stratégie : requests/limits partout, Prometheus rétent
 (ex. 24 h), composants inutiles désactivés (ex. Argo CD Dex/notifications), installation progressive.
 **Recommandation : passer la VM à 4 vCPU si possible** (gratuit, réglage VMware).
 
+## 4 ter. GitHub
+
+- Dépôt : https://github.com/Ghassen-kahia/plateforme-devsecops (public), compte `Ghassen-kahia`.
+- Authentification : `gh` (keyring de l'utilisateur, scopes repo/workflow) ; ne jamais afficher le token.
+  Le token n'a PAS `read:packages` : vérifier GHCR par un accès anonyme (`ghcr.io/token`).
+- Images : `ghcr.io/ghassen-kahia/plateforme-{api,frontend}:sha-<12>` (publiques).
+- La CI pousse sur main (commits `chore(gitops)`) : faire `git pull --rebase` avant de travailler.
+
 ## 4 bis. Accès local
 
 - dev : `http://dev.plateforme.local` ; prod : `http://plateforme.local` (Traefik sur 80).
@@ -135,15 +143,17 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] dev et prod déployés manuellement, temps mesurés
   - [x] Probes, NetworkPolicy (contrôle positif), HPA, quota, release défectueuse et rollback testés
   - [x] Incident 502 diagnostiqué et corrigé (label de version dans le pod PostgreSQL)
-- [ ] **Phase 5 — Pipeline CI DevSecOps** (en cours : partie locale terminée, GitHub requis)
+- [x] **Phase 5 — Pipeline CI DevSecOps** (terminée le 2026-10-14)
   - [x] gh 2.102, gitleaks 8.30.1, actionlint 1.7.12, shellcheck, semgrep 1.178.0 (venv), Trivy figé en 0.74.0
   - [x] `.github/workflows/ci.yml` (lint/test, gitleaks, semgrep, IaC/SCA, build/scan/push GHCR, update-gitops)
   - [x] `.github/workflows/promote.yml` (promotion manuelle dev → prod)
   - [x] État désiré par environnement : `k8s/environments/{dev,prod}/values.yaml`
   - [x] Contrôles positifs locaux : secret factice et dépendance vulnérable bloqués
-  - [ ] Dépôt GitHub créé et poussé (authentification `gh auth login` par l'utilisateur)
-  - [ ] Premier pipeline vert, images dans GHCR, commit GitOps automatique
-  - [ ] PR de démonstration bloquées (secret factice, vulnérabilité) et durées mesurées
+  - [x] Dépôt public https://github.com/Ghassen-kahia/plateforme-devsecops (`gh auth login` par l'utilisateur)
+  - [x] Pipeline vert (141 s), images GHCR publiques, commit GitOps automatique
+  - [x] PR #1 (secret factice) bloquée par Gitleaks, PR #2 (pyyaml 5.3.1) bloquée par Trivy ; fermées sans fusion
+  - [x] Correctif : périmètre Gitleaks par événement + scan complet hebdomadaire
+  - [ ] Limite : pas de protection de branche (incompatible avec le push GitOps direct) — documentée
 - [ ] Phase 6 — GitOps avec Argo CD
 - [ ] Phase 7 — Supervision
 - [ ] Phase 8 — Documentation professionnelle
