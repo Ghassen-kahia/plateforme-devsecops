@@ -1,0 +1,58 @@
+# Environnement de développement local : API + frontend + PostgreSQL.
+# Usage : cp ../.env.example ../.env (puis renseigner les valeurs) ; docker compose --env-file ../.env up -d --build
+#
+# Sécurité : les ports sont publiés sur 127.0.0.1 uniquement, car Docker contourne UFW
+# (voir docs/apprentissage.md). Le mot de passe vient du fichier .env (ignoré par Git).
+
+name: plateforme
+
+services:
+  db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-plateforme}
+      POSTGRES_USER: ${POSTGRES_USER:-plateforme}
+      # :? → Compose refuse de démarrer si la variable est absente (pas de mot de passe vide)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD doit être défini dans .env}
+    volumes:
+      # PostgreSQL 18 : le volume se monte sur /var/lib/postgresql (données dans 18/docker)
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"   # pour les tests d'intégration depuis l'hôte
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: plateforme-api:dev
+    environment:
+      APP_VERSION: ${APP_VERSION:-dev}
+      DB_HOST: db
+      DB_NAME: ${POSTGRES_DB:-plateforme}
+      DB_USER: ${POSTGRES_USER:-plateforme}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD doit être défini dans .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"   # accès direct à /docs et /metrics en développement
+
+  frontend:
+    build:
+      context: frontend
+    image: plateforme-frontend:dev
+    environment:
+      BACKEND_HOST: api
+      BACKEND_PORT: "8000"
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  pgdata:

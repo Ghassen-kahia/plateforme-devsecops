@@ -84,7 +84,8 @@ CPU : 2 vCPU est juste. Stratégie : requests/limits partout, Prometheus rétent
 ## 7. Structure du dépôt (créée progressivement)
 
 ```
-app/{backend,frontend,tests}  infra/{terraform/{local,aws},ansible}
+app/{backend/api,frontend,tests/{unit,integration}}, app/Dockerfile (API), app/frontend/Dockerfile (contexte de build propre au frontend)
+  infra/{terraform/{local,aws},ansible}
 k8s/{helm/plateforme,argocd}  monitoring/  .github/workflows/
 docs/{apprentissage.md,mesures.md,architecture,rapport,presentation}
 scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
@@ -98,7 +99,13 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] `scripts/install.sh base` écrit et validé syntaxiquement
   - [x] Docker + Compose + venv installés et vérifiés (`hello-world` OK)
   - [x] Identité Git configurée (locale au dépôt), commit de fin de phase
-- [ ] Phase 1 — Application de démonstration (FastAPI, Nginx, PostgreSQL, pytest, Compose)
+- [x] **Phase 1 — Application de démonstration** (terminée le 2026-10-14)
+  - [x] API FastAPI (`/health`, `/ready`, `/metrics`, `/api/version`, CRUD `/api/tasks`)
+  - [x] Frontend HTML/CSS/JS + Nginx (proxy `/api`, en-têtes de sécurité)
+  - [x] PostgreSQL 18 via Compose, ports sur 127.0.0.1
+  - [x] 16 tests unitaires + 4 d'intégration (réussis contre un vrai PostgreSQL)
+  - [x] Panne de base simulée : liveness OK, readiness 503, reprise ≈ 1 s
+  - [ ] (Phase 2) Dockerfiles encore naïfs : root, 1,69 GB
 - [ ] Phase 2 — Conteneurisation sécurisée (+ installation Trivy)
 - [ ] Phase 3 — Terraform et Ansible (+ installation terraform, ansible ; k3s via Ansible)
 - [ ] Phase 4 — Kubernetes et Helm (+ kubectl, helm)
@@ -114,6 +121,11 @@ Installation des outils : **juste-à-temps**, dans la phase qui en a besoin (cib
 ## 9. Commandes de validation
 
 ```bash
+# Application (depuis app/)
+../.venv/bin/ruff check . && ../.venv/bin/ruff format --check . && ../.venv/bin/pytest -q
+docker compose --env-file ../.env up -d --build
+set -a; . ../.env; set +a; DB_PASSWORD="$POSTGRES_PASSWORD" RUN_INTEGRATION=1 ../.venv/bin/pytest
+# Environnement
 bash scripts/install.sh check        # prérequis Phase 0
 docker run --rm hello-world          # moteur Docker fonctionnel
 docker compose version
@@ -129,4 +141,9 @@ git status
 | 2026-10-14 | Semgrep plutôt que SonarQube | SonarQube demande ≈ 2 GiB RAM + PostgreSQL dédié, disproportionné sur 2 vCPU |
 | 2026-10-14 | Ports Compose liés à 127.0.0.1 | Docker contourne UFW |
 | 2026-10-14 | Docker CE 29.9.0 / Compose v5.6.0 | Versions stables du dépôt officiel au jour de l'installation |
+| 2026-10-14 | psycopg 3 + pool, sans ORM | Peu de tables ; SQL explicite, plus simple à expliquer |
+| 2026-10-14 | Liveness `/health` sans base, readiness `/ready` avec base | Éviter les redémarrages en cascade |
+| 2026-10-14 | `httpx` gardé malgré l'avertissement Starlette (httpx2) | Paquet éprouvé ; avertissement filtré et documenté |
+| 2026-10-14 | Dockerfiles naïfs en Phase 1, durcis en Phase 2 | Avant/après Trivy réellement mesuré |
+| 2026-10-14 | Images : python 3.12.15, nginx 1.30.5 (branche stable), postgres 18.6-alpine3.24 | Tags précis relevés sur Docker Hub |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

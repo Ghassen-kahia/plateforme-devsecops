@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plateforme DevSecOps — Tâches</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Tâches</h1>
+    <p class="meta">API <span id="version">…</span> · base de données <span id="db" class="badge">…</span></p>
+  </header>
+  <main>
+    <form id="task-form" autocomplete="off">
+      <label for="title" class="sr-only">Nouvelle tâche</label>
+      <input id="title" name="title" maxlength="200" placeholder="Nouvelle tâche" required>
+      <button type="submit">Ajouter</button>
+    </form>
+    <p id="error" class="error" role="alert" hidden></p>
+    <ul id="tasks"></ul>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# Configuration des outils Python (pas de packaging : l'API est exécutée depuis app/backend)
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["tests"]
+markers = [
+    "integration: tests nécessitant une base PostgreSQL réelle (variables DB_*)",
+]
+addopts = "-ra --strict-markers"
+# Avertissement connu et non bloquant : Starlette 1.x recommande httpx2 pour TestClient.
+# On garde httpx (dépendance standard et éprouvée) ; à réévaluer lors d'une montée de version.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend", "tests"]
+
+[tool.ruff.lint]
+# E/F : erreurs de base, I : tri des imports, B : bugs probables, S : règles de sécurité (bandit),
+# UP : syntaxe moderne, SIM : simplifications
+select = ["E", "F", "I", "B", "S", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["api"]
+
+[tool.ruff.lint.per-file-ignores]
+# Exceptions justifiées, limitées aux tests :
+# - S101 : assert est le mécanisme normal de pytest
+# - S105/S106 : mots de passe FACTICES nécessaires pour tester le masquage des secrets
+#   (Gitleaks reste actif sur tout le dépôt et détecterait un vrai secret)
+"tests/**" = ["S101", "S105", "S106"]

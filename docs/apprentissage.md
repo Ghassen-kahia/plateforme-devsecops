@@ -106,3 +106,107 @@ télécharge l'image depuis Docker Hub, puis containerd/runc créent et exécute
 5. **Comment avez-vous vérifié l'état du pare-feu, et quel piège avez-vous rencontré ?**
    Voir le tableau des erreurs : `systemctl is-active` ≠ `ufw status`. C'est une leçon de diagnostic :
    vérifier l'effet réel (le filtrage) plutôt que l'indicateur indirect (le service).
+
+---
+
+## Phase 1 — Application de démonstration
+
+### Architecture applicative
+
+```
+Navigateur ──► Nginx :8080 ──(/api/*, /ready)──► FastAPI :8000 ──► PostgreSQL :5432
+               (fichiers statiques)               (/health, /metrics non exposés par Nginx)
+```
+
+- **Nginx relaie `/api`** : le navigateur ne voit qu'une seule origine, donc pas de CORS à configurer.
+  `/metrics` n'est pas relayé : les métriques ne sont pas publiques, Prometheus les collectera
+  directement sur le Service Kubernetes de l'API.
+- **Configuration par variables d'environnement (12-factor)** : la même image tourne en dev, en CI et sur k3s.
+  `pydantic-settings` valide les types, et `SecretStr` empêche le mot de passe d'apparaître dans un `repr()` ou un log.
+
+### Concept clé : liveness ≠ readiness
+
+| Sonde | Question posée | Endpoint | Si échec dans Kubernetes |
+|---|---|---|---|
+| Liveness | « Le processus est-il bloqué ? » | `/health` | Le conteneur est **redémarré** |
+| Readiness | « Puis-je recevoir du trafic ? » | `/ready` (teste la base) | Le pod est **retiré du Service**, sans redémarrage |
+
+**Erreur classique** : mettre la vérification de la base dans la liveness. Si PostgreSQL tombe, tous les
+pods de l'API redémarrent en boucle (CrashLoopBackOff) alors qu'ils ne sont pas en cause, ce qui
+aggrave l'incident. Test réalisé : base arrêtée → `/health` 200, `/ready` 503, `/api/tasks` 503 ;
+base redémarrée → retour à 200 en environ 1 s, sans redémarrer l'API.
+
+### Concept clé : cardinalité des métriques
+
+Chaque combinaison de labels Prometheus forme une série temporelle stockée en mémoire. Avec le label
+`route="/api/tasks/42"`, chaque identifiant créerait une nouvelle série. On utilise donc le **modèle**
+de route (`/api/tasks/{task_id}`). Un test unitaire vérifie ce comportement.
+
+Méthode **RED** pour un service : **R**ate (débit), **E**rrors (taux d'erreurs 5xx), **D**uration
+(latence, via un histogramme qui permet de calculer des percentiles avec `histogram_quantile`).
+
+### Concept clé : pattern repository et pyramide de tests
+
+- **Tests unitaires** (16) : dépôt en mémoire, rapides (< 1 s), sans dépendance externe. Ils vérifient
+  la logique HTTP : validation, codes de retour, 404, 503, métriques, masquage des secrets.
+- **Tests d'intégration** (4) : vrai PostgreSQL. Ils vérifient le SQL, la persistance et la résistance à
+  l'injection SQL. Sans base, ils sont marqués **SKIPPED** et jamais comptés comme réussis.
+
+### Sécurité applicative intégrée dès cette phase
+
+| Mesure | Menace couverte |
+|---|---|
+| Requêtes SQL paramétrées (`%s`) | Injection SQL (testée avec `'); DROP TABLE tasks; --`) |
+| `textContent` au lieu de `innerHTML` côté JS | XSS |
+| En-têtes CSP, `X-Frame-Options`, `nosniff`, `server_tokens off` | XSS, clickjacking, divulgation de version |
+| Message 503 générique, détail uniquement dans les logs | Fuite d'informations internes |
+| `${POSTGRES_PASSWORD:?}` dans Compose | Démarrage accidentel avec un mot de passe vide |
+| Ports publiés sur 127.0.0.1 | Exposition réseau (Docker contourne UFW) |
+| Ruff avec règles `S` (bandit) | Mauvaises pratiques de sécurité dans le code Python |
+
+### Commandes utiles
+
+```bash
+cd app
+../.venv/bin/ruff check . && ../.venv/bin/ruff format --check .      # lint et format
+../.venv/bin/pytest -q                                               # tests unitaires
+docker compose --env-file ../.env up -d --build                      # démarrer la stack
+set -a; . ../.env; set +a                                            # charger .env sans l'afficher
+DB_PASSWORD="$POSTGRES_PASSWORD" RUN_INTEGRATION=1 ../.venv/bin/pytest --cov=api   # tous les tests
+curl -s localhost:8000/metrics | grep ^http_requests_total           # métriques
+```
+
+### Erreurs rencontrées — Phase 1
+
+| Erreur | Cause | Solution |
+|---|---|---|
+| Ruff B008 « function call in argument defaults » (×6) | `Depends()` en valeur par défaut, ancien style FastAPI | Alias `Repo = Annotated[TaskRepository, Depends(get_repo)]` (style recommandé) |
+| Ruff I001 sur l'ordre des imports | `api` pris pour un paquet tiers | `known-first-party = ["api"]` |
+| Ruff S106 dans un test | Mot de passe **factice** dans le test de masquage | Exception documentée limitée à `tests/**` (S105, S106) |
+| Avertissement Starlette « use httpx2 » | Starlette 1.x recommande le successeur de httpx | httpx conservé (paquet éprouvé) ; avertissement filtré et documenté dans `pyproject.toml` |
+| `required variable POSTGRES_PASSWORD is missing` | `docker compose logs` lancé sans `--env-file ../.env` | Comportement voulu (garde `:?`) ; toujours passer `--env-file` |
+
+### Questions d'entretien — Phase 1
+
+1. **Pourquoi `/health` ne vérifie-t-il pas la base de données ?**
+   Kubernetes redémarre un conteneur dont la liveness échoue. Une panne de base ferait redémarrer en
+   boucle tous les pods de l'API sans rien réparer. La dépendance à la base relève de la readiness :
+   le pod est retiré du load balancing jusqu'au retour de la base. Je l'ai testé en arrêtant PostgreSQL.
+2. **Comment évitez-vous l'injection SQL ?**
+   Toutes les requêtes passent des paramètres séparés au driver (`cur.execute("... WHERE id = %s", (id,))`).
+   PostgreSQL reçoit la requête et les valeurs séparément, et une valeur ne peut jamais devenir du code SQL.
+   Un test d'intégration insère une charge d'injection et vérifie qu'elle est stockée comme du texte.
+3. **Pourquoi des tests unitaires ET d'intégration ?**
+   Les unitaires sont rapides et isolent la logique : ils détectent vite les régressions. Ils ne
+   prouvent cependant pas que le SQL fonctionne réellement. Les tests d'intégration contre un vrai
+   PostgreSQL couvrent ce point. En CI, la base sera fournie par un conteneur de service GitHub Actions.
+4. **Qu'est-ce que la cardinalité dans Prometheus, et comment l'avez-vous maîtrisée ?**
+   Voir le concept ci-dessus : label `route` = modèle de route, et routes inconnues regroupées sous `<non_routé>`.
+5. **(Compromis)** **Pourquoi créer le schéma au démarrage plutôt qu'avec Alembic ?**
+   Pour une table unique, un `CREATE TABLE IF NOT EXISTS` idempotent suffit et évite un outil de plus.
+   La limite : il n'y a ni versionnement ni retour arrière du schéma. En production avec plusieurs
+   évolutions, j'utiliserais Alembic, lancé par un Job Kubernetes ou un hook Helm `pre-upgrade`.
+6. **(Dépannage)** **L'API répond 503 sur `/api/tasks` : votre démarche ?**
+   1) `/health` répond-il ? Si oui, le processus est vivant. 2) `/ready` : la base est-elle joignable ?
+   3) Logs de l'API : message psycopg (DNS, refus de connexion, authentification). 4) État de la base :
+   `docker compose ps`, `pg_isready`. 5) Métrique `app_database_up` dans Prometheus.
