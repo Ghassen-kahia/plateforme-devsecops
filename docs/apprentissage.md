@@ -847,3 +847,150 @@ attendre l'intervalle de 60 s, qui ne concerne que la comparaison avec **Git**.
    Voir l'incident : corréler les erreurs avec les événements `Killing`, écarter les autres causes
    (base stable), puis corriger avec preStop et **mesurer de nouveau** sous trafic (0 erreur sur plus de
    3 300 requêtes, sur trois déploiements).
+
+---
+
+## Phase 7 — Supervision (Prometheus, Grafana, Alertmanager)
+
+### Architecture de la supervision
+
+```
+API FastAPI /metrics ──(ServiceMonitor, 15 s)──┐
+Traefik :9100 /metrics ──(PodMonitor, 15 s)────┤
+kubelet / cAdvisor, node-exporter,             ├──► Prometheus ──(règles)──► Alertmanager ──► (canal externe à brancher)
+kube-state-metrics, apiserver, CoreDNS ────────┘        │
+                                                       └──► Grafana (tableau de bord provisionné depuis Git)
+```
+
+- **kube-prometheus-stack** : Prometheus Operator + CRD (`ServiceMonitor`, `PodMonitor`,
+  `PrometheusRule`). On décrit QUOI superviser par des objets Kubernetes, et l'opérateur génère la
+  configuration de Prometheus.
+- **La supervision de l'application vit dans son chart** (ServiceMonitor + PrometheusRule), déployée
+  par Argo CD. Changer l'application et ses alertes se fait dans la même PR.
+- **k3s** : contrôleur, scheduler, etcd et kube-proxy sont intégrés au processus k3s, sans cible
+  séparée. Leur supervision est désactivée pour éviter des alertes `TargetDown` permanentes.
+
+### Les 4 alertes et leur logique
+
+| Alerte | Type | Expression (résumé) | `for` | Pourquoi |
+|---|---|---|---|---|
+| BaseDeDonneesIndisponible | **cause** | `min(app_database_up) == 0` | 30 s | Oriente directement le diagnostic |
+| ApiIndisponible | **symptôme** | 0 réplique disponible (kube-state-metrics) | 1 min | Service totalement coupé |
+| TauxErreurs5xxEleve | **expérience utilisateur** | 5xx / total > 5 % **mesuré à Traefik** | 1 min | Ce que subit l'utilisateur |
+| LatenceP95Elevee | dégradation | p95 > 500 ms sur 5 min | 5 min | Lenteur avant panne |
+
+**Pourquoi mesurer les erreurs à l'Ingress ?** Quand l'API est hors service, elle n'est plus dans le
+Service : les requêtes n'arrivent plus jusqu'à elle, et **ses propres métriques ne voient aucune
+erreur**. Seul le point d'entrée (Traefik) voit les 502. C'est la différence entre la supervision
+« boîte blanche » (métriques internes) et le point de vue utilisateur.
+
+**`for:`** : durée pendant laquelle la condition doit rester vraie avant de passer de `pending` à
+`firing`. Elle évite les alertes sur des pics de quelques secondes. C'est un compromis entre rapidité
+de détection et bruit.
+
+### Exercice de panne contrôlée (mesures réelles)
+
+Panne déclenchée **par Git** (`database.replicas: 0`) : avec le self-heal d'Argo CD, un `kubectl scale`
+aurait été annulé en 2 s. La panne est ainsi tracée, revue et annulée par `git revert`.
+
+| Étape (référence : 1re erreur vue par un utilisateur, 20:27:28) | Délai |
+|---|---|
+| Alertes `pending` | +34 s |
+| `BaseDeDonneesIndisponible` reçue par Alertmanager | **+63 s** |
+| Les 3 alertes critiques reçues par Alertmanager | **+94 s** |
+| `git revert` poussé → service rétabli (HTTP 200) | 166 s |
+| `git revert` poussé → plus aucune alerte active | 359 s |
+
+Décomposition du délai de détection : intervalle de collecte (15 s) + évaluation des règles (30 s) +
+`for` (30 s à 1 min) + `group_wait` d'Alertmanager (10 s).
+
+### Ce que l'exercice a révélé (et qui a été corrigé)
+
+1. **Alertes sans label `namespace`.** `min()` et `sum()` suppriment les labels : les alertes de dev
+   et de prod étaient **identiques**, donc fusionnées par Alertmanager, et le routage par environnement
+   était impossible. Correction : label `namespace` statique dans chaque règle.
+2. **Clé YAML mal placée.** Le PodMonitor Traefik se trouvait sous `grafana:`, et était donc ignoré
+   **sans aucune erreur**. Correction, plus une vérification de structure (`yaml.safe_load` + assertion).
+3. **Effet de fenêtre.** Le `rate(...[2m])` contient encore des erreurs après le retour du service :
+   l'alerte 5xx est restée active jusqu'à environ 3 min après la correction, et elle est même passée en
+   `firing` **après** la reprise lors du premier exercice. Une fenêtre courte réagit plus vite mais
+   génère plus de bruit.
+4. **Changer les labels d'une règle remet les alertes à zéro** (nouvelle identité, `for` relancé).
+5. **node-exporter bridé 48 % du temps** (alerte `CPUThrottlingHigh`) : limite CPU portée de 100m à 250m.
+
+### Incident réel : gel de la VM puis cascade de redémarrages
+
+- **Faits** : aucune ligne dans le journal système entre 19:39 et 20:04 (25 min de silence total), un
+  trou équivalent dans Prometheus, des tâches de fond terminées « en avance » (saut d'horloge), puis au
+  réveil `Node became not ready`, des évictions et une charge de 52 sur 2 vCPU.
+- **Cause** : la VM a été suspendue par l'hôte (veille du PC ou pause VMware), ce qui est invisible de
+  l'intérieur. Au réveil, les heartbeats et toutes les probes ont expiré en même temps, provoquant une
+  vague de redémarrages qui a saturé les 2 vCPU (spirale : redémarrage → CPU → probes en échec →
+  redémarrage).
+- **Rétablissement** : automatique, en environ 8 min, sans intervention.
+- **Leçons** :
+  - **Une supervision interne ne peut pas signaler que sa propre machine est figée.** C'est le rôle de
+    l'alerte `Watchdog`, toujours active : un service **externe** (Healthchecks.io, PagerDuty…)
+    s'alarme quand elle cesse d'arriver (« dead man's switch »).
+  - La marge CPU était trop faible : au repos, la plateforme complète consommait **≈ 73 % des 2 vCPU**
+    (34 % en temps système). Les probes `exec` de PostgreSQL (création d'un processus à chaque essai)
+    ont été allégées et l'effet mesuré (voir mesures.md, M9).
+  - Recommandation maintenue depuis la Phase 0 : **4 vCPU** pour faire tourner toute la stack sereinement.
+
+### Commandes utiles
+
+```bash
+bash monitoring/install.sh                                         # installer / mettre à jour
+kubectl -n monitoring port-forward svc/kps-grafana 3000:80         # http://localhost:3000
+kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090
+# Sans port-forward (plus robuste) : proxy du serveur d'API
+kubectl get --raw "/api/v1/namespaces/monitoring/services/kps-kube-prometheus-stack-prometheus:9090/proxy/api/v1/alerts" | jq
+kubectl get --raw "/api/v1/namespaces/monitoring/services/kps-kube-prometheus-stack-alertmanager:9093/proxy/api/v2/alerts" | jq
+kubectl get servicemonitor,podmonitor,prometheusrule -A
+```
+
+PromQL de base :
+```promql
+sum by (route, status) (rate(http_requests_total{namespace="plateforme-prod"}[5m]))      # débit
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))  # p95
+sum(rate(traefik_service_requests_total{code=~"5.."}[2m])) / sum(rate(traefik_service_requests_total[2m]))
+```
+
+### Erreurs rencontrées — Phase 7
+
+| Problème | Cause | Solution |
+|---|---|---|
+| Aucune métrique Traefik | Bloc `additionalPodMonitors` sous `grafana:` (indentation) | Déplacé sous `prometheus:` + contrôle de structure |
+| Mes alertes semblaient absentes | Mon filtre `namespace` ; les agrégations l'avaient supprimé | Label `namespace` ajouté aux règles |
+| Port-forward coupé pendant un suivi long | Pod Prometheus recréé / VM gelée | Proxy du serveur d'API (`kubectl get --raw`) |
+| `pkill -f motif` a tué mon propre shell | Le motif figurait dans sa ligne de commande | Arrêt des tâches par identifiant |
+| `gitleaks dir monitoring k8s` → 125 « fuites » | Un seul chemin accepté : tout le répertoire courant, collections comprises, a été scanné | `gitleaks git --pre-commit --staged` avant commit |
+| Script d'exercice menacé par une modification locale | `git pull --rebase` refuse un répertoire modifié | `git stash` avant le pull, réappliqué ensuite |
+| CPU au repos ≈ 73 % | Stack complète sur 2 vCPU, probes exec coûteuses | Probes allégées (mesure A/B), 4 vCPU recommandés |
+
+### Questions d'entretien — Phase 7
+
+1. **Quelle différence entre une alerte sur une cause et une alerte sur un symptôme ?**
+   Le symptôme (« l'utilisateur reçoit des 5xx », « plus aucune réplique ») dit qu'il y a un impact :
+   c'est ce qui doit réveiller quelqu'un. La cause (« la base est injoignable ») accélère le diagnostic.
+   Bonne pratique : appeler sur les symptômes, et enrichir avec les causes, en lien avec un runbook.
+2. **Pourquoi votre alerte 5xx utilise-t-elle les métriques de Traefik et pas celles de l'API ?**
+   Quand l'API est retirée du Service, elle ne reçoit plus les requêtes, et son compteur d'erreurs ne
+   bouge pas. Seul le point d'entrée voit les 502. L'exercice l'a confirmé : ce sont les métriques
+   Traefik qui ont déclenché l'alerte.
+3. **Votre Prometheus tourne dans le cluster. Que se passe-t-il si tout le nœud tombe ?**
+   Personne n'est prévenu : Prometheus et Alertmanager tombent avec lui. C'est arrivé (gel de la VM
+   pendant 25 min, sans aucune alerte). La réponse est l'alerte `Watchdog`, envoyée en permanence vers
+   un service externe qui s'alarme quand elle s'arrête, complétée par une sonde externe (blackbox).
+4. **Comment choisissez-vous la durée `for` et la fenêtre `rate()` ?**
+   Compromis entre délai de détection et faux positifs. Mesuré : 63 à 94 s entre la première erreur
+   et l'alerte. La fenêtre de 2 min a aussi prolongé l'alerte d'environ 3 min après la reprise. Pour un
+   service critique, on utilise les alertes multi-fenêtres sur le budget d'erreur (SLO, burn rate).
+5. **Qu'est-ce que la cardinalité, et comment l'avez-vous maîtrisée ?**
+   Voir la Phase 1 (label `route` = modèle de route). Ici aussi : rétention de 24 h et 2 Go, collecte de
+   15 à 30 s, composants inutiles désactivés.
+6. **(Dépannage)** **La plateforme est lente et la charge système atteint 52. Votre démarche ?**
+   1) Stabiliser d'abord : couper sa propre charge et observer si le système récupère seul.
+   2) Mesurer : `top` instantané (et non `ps`, qui donne une moyenne sur la vie du processus), `vmstat`,
+   historique Prometheus (CPU par mode, PSI, swap). 3) Chercher les trous : un trou de 25 min dans le
+   journal système a révélé un gel de la VM. 4) Corriger la cause de fond (marge CPU), puis remesurer.

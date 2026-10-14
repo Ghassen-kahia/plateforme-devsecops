@@ -178,3 +178,17 @@ openssl rand -base64 24 | tr -d '/+=\n' | kubeseal --raw --scope strict \
 # Attention : changer le mot de passe exige aussi de le changer DANS PostgreSQL (ALTER ROLE),
 # sinon l'API ne pourra plus se connecter.
 ```
+
+## 9. Supervision
+
+| Mesure | Implémentation |
+|---|---|
+| Grafana | Mot de passe admin aléatoire dans un Secret (le chart impose sinon `prom-operator`, connu publiquement : vérifié refusé) |
+| Accès | Grafana, Prometheus et Alertmanager sans Ingress : port-forward ou proxy de l'API (RBAC Kubernetes) |
+| /metrics de l'API | Non exposé par Nginx ; NetworkPolicy : seul le namespace `monitoring` peut le collecter |
+| Namespace monitoring | PSA `privileged` (node-exporter : hostNetwork/hostPID), isolé des applications |
+| Alertes de sécurité utiles | Une NetworkPolicy supprimée est rétablie par Argo CD en 2 s (Phase 6) ; une alerte sur les dérives Argo CD (`argocd_app_info{sync_status="OutOfSync"}`) est une extension possible |
+
+**Limite** : aucun canal de notification externe (e-mail, Slack…), car il exigerait un compte et un
+secret. Les alertes sont visibles dans Alertmanager. L'alerte `Watchdog` devrait être envoyée à un
+service externe de type « dead man's switch » (incident de gel de la VM, Phase 7).

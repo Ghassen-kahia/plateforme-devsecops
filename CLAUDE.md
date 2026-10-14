@@ -31,6 +31,7 @@ Toute la documentation et les explications sont **en français**.
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
 Installés en Phase 2 : Trivy 0.76.0.
+Installés en Phase 7 : kube-prometheus-stack 91.8.2 (Helm). Images d'outillage documentaire : pandoc/latex:3.11.0, marpteam/marp-cli:v4.5.1.
 Installés en Phase 6 : kubeseal 0.40.0 (release vérifiée), Sealed Secrets 0.40.0 et Argo CD v3.5.4 (Helm, `scripts/gitops-bootstrap.sh`).
 Installés en Phase 5 : gh 2.102.0 (dépôt APT GitHub), gitleaks 8.30.1 et actionlint 1.7.12 (releases vérifiées), shellcheck 0.9.0 (Ubuntu), semgrep 1.178.0 (~/.venvs/semgrep). Trivy remplacé par le binaire 0.74.0 figé.
 Installés en Phase 4 : k3s v1.36.5+k3s1 (Ansible), kubectl 1.36.5 (pkgs.k8s.io), Helm 4.3.0 (dépôt Helm).
@@ -74,6 +75,13 @@ CPU : 2 vCPU est juste. Stratégie : requests/limits partout, Prometheus rétent
   Le token n'a PAS `read:packages` : vérifier GHCR par un accès anonyme (`ghcr.io/token`).
 - Images : `ghcr.io/ghassen-kahia/plateforme-{api,frontend}:sha-<12>` (publiques).
 - La CI pousse sur main (commits `chore(gitops)`) : faire `git pull --rebase` avant de travailler.
+
+## 4 quinquies. Supervision
+
+- Grafana : `kubectl -n monitoring port-forward svc/kps-grafana 3000:80` (admin, mot de passe dans le Secret `grafana-admin`).
+- Requêtes sans port-forward : `kubectl get --raw /api/v1/namespaces/monitoring/services/kps-kube-prometheus-stack-prometheus:9090/proxy/api/v1/...`
+- **Ressources** : au repos ≈ 67–73 % des 2 vCPU utilisés. Éviter de lancer de lourdes opérations en parallèle. 4 vCPU recommandés.
+- La VM peut être gelée par l'hôte (veille) : au réveil, une cascade de redémarrages est normale (≈ 8 min).
 
 ## 4 quater. GitOps — règles d'exploitation
 
@@ -171,7 +179,13 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] Push → dev en 189 s ; config Git → dev en 49 s ; rollback `git revert` en 89 s ; promotion prod en 84 s
   - [x] Self-heal : 3 dérives corrigées en 1,7 à 6,1 s
   - [x] Incident 502 au rolling update corrigé (preStop) : 0 erreur sur 3 337 requêtes
-- [ ] Phase 7 — Supervision
+- [x] **Phase 7 — Supervision** (terminée le 2026-10-14)
+  - [x] kube-prometheus-stack 91.8.2 (`monitoring/install.sh`), profil réduit, adapté à k3s
+  - [x] ServiceMonitor API + PodMonitor Traefik ; 4 alertes par environnement (base, API, 5xx Ingress, p95)
+  - [x] Tableau de bord Grafana provisionné depuis Git (12 panneaux vérifiés)
+  - [x] Panne contrôlée via Git : alertes dans Alertmanager en 63–94 s ; retour en 166 s ; résolution en 359 s
+  - [x] Corrigés : label namespace des alertes, PodMonitor mal placé, node-exporter bridé, probes PostgreSQL
+  - [x] Incident documenté : gel de la VM par l'hôte → cascade de redémarrages (charge 52), reprise auto
 - [ ] Phase 8 — Documentation professionnelle
 - [ ] Phase 9 — Rapport (pandoc)
 - [ ] Phase 10 — Présentation (marp)
@@ -239,4 +253,8 @@ git status
 | 2026-10-14 | Sealed Secrets (portée strict) | Secrets versionnés sans service externe payant |
 | 2026-10-14 | preStop sleep 5 s natif | Course SIGTERM / endpoints mesurée et corrigée |
 | 2026-10-14 | Toujours chaîner les validations avec `&&` avant commit | Un commit est parti malgré un échec (`;`) |
+| 2026-10-14 | Alerte 5xx mesurée à Traefik (Ingress) | L'API hors service ne voit pas les requêtes |
+| 2026-10-14 | Supervision de l'application dans son chart (ServiceMonitor, PrometheusRule) | Versionnée et déployée avec l'application |
+| 2026-10-14 | Panne contrôlée via Git (`database.replicas`) | Le self-heal annulerait un `kubectl scale` |
+| 2026-10-14 | Pandoc et Marp via Docker (versions figées) | Pas de TeX Live ni de navigateur à installer sur la VM |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

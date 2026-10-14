@@ -264,6 +264,55 @@ Trivy (×3), SBOM, publication et traçabilité Git.
   push (une mesure peut varier de 0 à 60 s) ; une seule mesure par scénario ; pas de webhook (VM non
   joignable depuis GitHub).
 
+## M9 — Supervision et panne contrôlée (Phase 7)
+
+- **Date** : 2026-10-14 — kube-prometheus-stack 91.8.2 (Prometheus 3.15, Grafana 13.2.3,
+  Alertmanager 0.34.1), collecte 15 s (application, Traefik) et 30 s (reste), évaluation 30 s.
+
+### Installation et couverture
+
+| Mesure | Résultat |
+|---|---|
+| Installation (`monitoring/install.sh`) | 121 s |
+| Cibles collectées | 18 cibles `up` (dont Traefik et 3 pods API), 0 en échec |
+| Règles de l'application | 8 (4 × 2 environnements), toutes `ok` |
+| Panneaux Grafana renvoyant des données | 12 / 12 (14 requêtes) |
+| Connexion Grafana avec le mot de passe par défaut du chart | refusée (HTTP 401) |
+
+### Panne contrôlée n° 2 (exercice propre), dev, trafic 3 req/s
+
+Méthode : script `exercice.sh` (panne et retour par commits Git), état relevé toutes les 5 s
+(PostgreSQL, HTTP via l'Ingress, alertes Prometheus et Alertmanager via le proxy de l'API).
+
+| Jalon | Horodatage | Délai |
+|---|---|---|
+| Commit de panne poussé | 20:25:28 | — |
+| Première erreur utilisateur (503 puis 502), après détection par Argo CD | 20:27:28 | 120 s après le push |
+| Alertes `pending` | 20:28:02 | +34 s après la 1re erreur |
+| `BaseDeDonneesIndisponible` dans Alertmanager | 20:28:31 | **+63 s** |
+| `ApiIndisponible` + `TauxErreurs5xxEleve` dans Alertmanager | 20:29:02 | **+94 s** |
+| `git revert` poussé | 20:29:04 | — |
+| Service rétabli (HTTP 200) | 20:31:50 | 166 s après le revert |
+| Plus aucune alerte dans Alertmanager | 20:35:03 | 359 s après le revert |
+
+Panne n° 1 (19:36) : non exploitable pour les délais, car la VM a été gelée par l'hôte entre 19:39
+et 20:04 (aucune ligne de journal). Elle a néanmoins permis de détecter l'absence du label `namespace`.
+
+### Consommation de ressources
+
+| Mesure | Valeur |
+|---|---|
+| Pile de supervision (6 pods) | ≈ 195m CPU, ≈ 1 Go RAM (Prometheus 483 Mi, Grafana 385 Mi) |
+| Nœud complet au repos (`vmstat` 2 min, aucun trafic) — **avant** allègement des probes | user 39 %, system 34 %, **idle 27 %** |
+| Idem **après** (liveness TCP, readiness PostgreSQL 10 s) | user 36 %, system 31 %, **idle 33 %** |
+| Mémoire VM | ≈ 5,6 Gi utilisés / 11 Gi |
+| Disque utilisé | 49 Go / 79 Go |
+| node-exporter : part des périodes CPU bridées (limite 100m) | 48 % → limite portée à 250m |
+
+- **Limites** : une seule panne exploitable ; la mesure A/B suit de près des redémarrages (probes,
+  nouvelle image) et la différence (+6 points) est du même ordre que la variabilité normale. On peut
+  seulement conclure que les probes n'étaient pas la cause principale de la charge.
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
@@ -275,4 +324,4 @@ Trivy (×3), SBOM, publication et traçabilité Git.
 | Durée du pipeline CI | 5 | mesuré (M7) |
 | Délai entre le push et la nouvelle version disponible | 6 | mesuré (M8) : 189 s |
 | Temps de rollback (GitOps et Deployment) | 6 | mesuré (M5, M8) |
-| Temps de détection d'une panne | 7 | à mesurer |
+| Temps de détection d'une panne | 7 | mesuré (M9) : 63–94 s |
