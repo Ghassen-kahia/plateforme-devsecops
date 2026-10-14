@@ -1,0 +1,14 @@
+# Configuration Gitleaks : règles par défaut + exceptions ciblées et justifiées.
+[extend]
+useDefault = true
+
+# Textes CHIFFRÉS par Sealed Secrets (kubeseal) : conçus pour être publiés dans Git.
+# Seule une ligne `sealedPassword: "Ag…"` contenant au moins 300 caractères base64 (format d'un
+# chiffré kubeseal) est ignorée. Un secret en clair sous une autre clé, y compris dans le même
+# fichier, reste détecté (vérifié par contrôle positif, voir docs/securite.md).
+# NB : un critère de chemin (`paths`) avait d'abord été ajouté ; il faisait ignorer tout le
+# fichier (contrôle positif en échec) et a été retiré.
+[[allowlists]]
+description = "Valeurs chiffrées par Sealed Secrets (kubeseal)"
+regexTarget = "line"
+regexes = ['''^\s*sealedPassword:\s*"Ag[A-Za-z0-9+/=]{300,}"\s*$''']

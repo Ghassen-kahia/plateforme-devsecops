@@ -11,6 +11,7 @@ scan:
   skip-dirs:
     - .venv
     - "**/.terraform"
+    - infra/ansible/collections   # collections tierces téléchargées (dont leurs fichiers de test)
   scanners:
     - vuln
     - secret
