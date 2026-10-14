@@ -1,0 +1,47 @@
+# --- Secrets et configuration locale (ne JAMAIS commiter) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+kubeconfig*
+*.kubeconfig
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+# .terraform.lock.hcl est volontairement commité (versions des providers figées)
+
+# --- Ansible ---
+*.retry
+
+# --- Helm ---
+k8s/helm/**/charts/*.tgz
+
+# --- Rapports de scan générés localement ---
+reports/
+*.sarif
+
+# --- Éditeurs / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
