@@ -9,8 +9,6 @@ ingress:
 api:
   logLevel: INFO
 database:
-  # PANNE CONTRÔLÉE (demo.sh) — annulée par git revert
-  replicas: 0
   storage: 512Mi
   # Mot de passe chiffré (kubeseal, portée strict : plateforme-db / plateforme-dev).
   # Re-chiffrer : voir docs/securite.md (section Sealed Secrets)
