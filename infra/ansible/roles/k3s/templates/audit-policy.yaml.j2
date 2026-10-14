@@ -1,0 +1,19 @@
+# Politique d'audit de l'API Kubernetes — gérée par Ansible.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: ["RequestReceived"]
+rules:
+  # Bruit : lectures fréquentes des composants système
+  - level: None
+    users: ["system:kube-proxy", "system:apiserver"]
+  - level: None
+    resources:
+      - group: "coordination.k8s.io"
+        resources: ["leases"]
+  # Secrets : métadonnées uniquement (jamais le contenu dans les logs)
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets", "configmaps"]
+  # Tout le reste : métadonnées (utilisateur, verbe, ressource, horodatage)
+  - level: Metadata

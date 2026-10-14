@@ -5,6 +5,7 @@
 # Usage :
 #   sudo bash scripts/install.sh base      # Phase 0 : Docker Engine + Compose, Python venv
 #   sudo bash scripts/install.sh scan      # Phase 2 : Trivy (scan d'images, IaC, secrets)
+#   sudo bash scripts/install.sh iac       # Phase 3 : Terraform, Ansible, ansible-lint
 #   sudo bash scripts/install.sh check     # Vérification (sans sudo possible)
 #
 # Principes :
@@ -86,6 +87,23 @@ install_trivy() {
   apt-get install -y -q trivy
 }
 
+install_iac() {
+  if command -v terraform >/dev/null 2>&1; then
+    log "Terraform déjà présent : $(terraform version | head -1) — étape ignorée"
+  else
+    log "Installation de Terraform depuis le dépôt APT officiel de HashiCorp"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    add_apt_repo hashicorp https://apt.releases.hashicorp.com/gpg \
+      "https://apt.releases.hashicorp.com ${VERSION_CODENAME} main"
+    apt-get update -q
+    apt-get install -y -q terraform
+  fi
+  # Ansible et ansible-lint : versions des dépôts Ubuntu (stables, mises à jour de sécurité Ubuntu)
+  log "Installation d'Ansible et d'ansible-lint (dépôts Ubuntu)"
+  apt-get install -y -q ansible ansible-lint
+}
+
 check() {
   log "Vérification des prérequis"
   local ok=0
@@ -110,11 +128,17 @@ case "${1:-}" in
     install_trivy
     trivy --version | head -1
     ;;
+  iac)
+    require_root
+    install_iac
+    terraform version | head -1
+    ansible --version | head -1
+    ;;
   check)
     check
     ;;
   *)
-    echo "Usage : sudo bash $0 base|scan  |  bash $0 check"
+    echo "Usage : sudo bash $0 base|scan|iac  |  bash $0 check"
     exit 2
     ;;
 esac

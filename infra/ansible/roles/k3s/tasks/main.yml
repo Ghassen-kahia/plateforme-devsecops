@@ -1,0 +1,77 @@
+- name: Créer les répertoires de configuration et d'audit
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /etc/rancher/k3s
+    - "{{ k3s_audit_log_dir }}"
+
+- name: Déployer la configuration k3s
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Redémarrer k3s
+
+- name: Déployer la politique d'audit
+  ansible.builtin.template:
+    src: audit-policy.yaml.j2
+    dest: /etc/rancher/k3s/audit-policy.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Redémarrer k3s
+
+- name: Vérifier la version de k3s installée
+  ansible.builtin.command: k3s --version
+  register: k3s_installed
+  changed_when: false
+  failed_when: false
+  # Lecture seule : exécutée aussi en mode --check (sinon la variable serait vide)
+  check_mode: false
+
+- name: Télécharger le script d'installation k3s (somme SHA-256 vérifiée)
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh"
+    dest: /usr/local/src/k3s-install.sh
+    checksum: "sha256:{{ k3s_install_script_sha256 }}"
+    owner: root
+    group: root
+    mode: "0700"
+  when: k3s_version not in (k3s_installed.stdout | default(''))
+
+- name: Installer k3s (le script vérifie la somme SHA-256 du binaire)
+  ansible.builtin.command: /usr/local/src/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_SKIP_ENABLE: "false"
+  when: k3s_version not in (k3s_installed.stdout | default(''))
+  changed_when: true
+
+- name: Attendre que le nœud soit Ready
+  ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Créer ~/.kube pour l'utilisateur
+  ansible.builtin.file:
+    path: "~{{ k3s_kubeconfig_user }}/.kube"
+    state: directory
+    owner: "{{ k3s_kubeconfig_user }}"
+    group: "{{ k3s_kubeconfig_user }}"
+    mode: "0700"
+
+- name: Copier le kubeconfig pour l'utilisateur (0600)
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "~{{ k3s_kubeconfig_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ k3s_kubeconfig_user }}"
+    group: "{{ k3s_kubeconfig_user }}"
+    mode: "0600"
+  when: not ansible_check_mode

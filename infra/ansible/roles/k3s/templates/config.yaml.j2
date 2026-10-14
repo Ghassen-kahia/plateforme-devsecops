@@ -1,0 +1,27 @@
+# Configuration k3s — gérée par Ansible (rôle k3s).
+# Options de durcissement inspirées du « CIS Hardening Guide » de k3s.
+
+# kubeconfig lisible par root uniquement (copié ensuite pour l'utilisateur en 0600)
+write-kubeconfig-mode: "0600"
+
+# Chiffrement des Secrets au repos dans la base de données de k3s (AES-CBC, clé locale)
+secrets-encryption: true
+
+# Le kubelet refuse de démarrer si les paramètres noyau diffèrent de ceux attendus
+# (fixés par le rôle common) au lieu de les modifier silencieusement
+protect-kernel-defaults: true
+
+{% if k3s_tls_san | length > 0 %}
+tls-san:
+{% for san in k3s_tls_san %}
+  - "{{ san }}"
+{% endfor %}
+{% endif %}
+
+kube-apiserver-arg:
+  # Journal d'audit : qui a fait quoi sur l'API (niveau Metadata, sans le contenu des objets)
+  - "audit-log-path={{ k3s_audit_log_dir }}/audit.log"
+  - "audit-policy-file=/etc/rancher/k3s/audit-policy.yaml"
+  - "audit-log-maxage=30"
+  - "audit-log-maxbackup=5"
+  - "audit-log-maxsize=50"

@@ -1,0 +1,21 @@
+- name: Détecter la présence d'un serveur SSH
+  ansible.builtin.stat:
+    path: /usr/sbin/sshd
+  register: ssh_hardening_sshd
+
+- name: Signaler l'absence de serveur SSH (rôle ignoré)
+  ansible.builtin.debug:
+    msg: "openssh-server non installé : aucun durcissement SSH nécessaire sur cet hôte."
+  when: not ssh_hardening_sshd.stat.exists
+
+- name: Déployer la configuration SSH durcie
+  ansible.builtin.template:
+    src: 10-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: ssh_hardening_sshd.stat.exists
+  notify:
+    - Valider la configuration sshd
+    - Redémarrer sshd

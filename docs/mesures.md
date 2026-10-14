@@ -101,6 +101,27 @@ ses limites. Aucune valeur estimée ne figure dans les tableaux de résultats.
   scannée plus tard peut avoir plus ou moins de CVE). Les « 12 HIGH » du contrôle négatif sont
   comptés après le filtre `ignore-unfixed`. La taille est celle affichée par Docker 29.
 
+## M4 — Validation de l'Infrastructure as Code (Phase 3)
+
+- **Date** : 2026-10-14 — Terraform 1.16.6, provider AWS 6.68.0, provider Kubernetes 3.3.0,
+  ansible-core 2.16.3, ansible-lint 6.17.2, Trivy 0.76.0.
+
+| Contrôle | Commande | Résultat |
+|---|---|---|
+| Format Terraform | `terraform fmt -recursive -check` | 0 fichier à reformater |
+| Validation AWS | `terraform validate` | Success |
+| Validation local | `terraform validate` | Success |
+| Scan IaC, toutes sévérités | `trivy config infra/` | 1 LOW (AWS-0017, risque accepté) |
+| Scan IaC, contrôle bloquant | `trivy config --config trivy.yaml infra/` | code retour 0 |
+| Scan sans exceptions (contrôle) | copie sans `trivy:ignore` | 2 CRITICAL (AWS-0104), toutes deux couvertes par une exception justifiée |
+| Syntaxe Ansible | `ansible-playbook --syntax-check` | OK |
+| Lint Ansible | `ansible-lint` (profil production) | 0 échec, 0 avertissement, 24 fichiers |
+| Exécution à blanc | `ansible-playbook site.yml --check` | ok=18, changed=11, failed=0 (après correction d'un bug du mode check) |
+
+- **Limites** : la validation statique ne prouve pas que `terraform apply` réussirait sur AWS
+  (quotas, disponibilité des AMI, permissions IAM). Le mode `--check` d'Ansible ne simule pas les
+  tâches `command` (installation de k3s), qui seront validées par l'exécution réelle en Phase 4.
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |

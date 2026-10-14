@@ -31,6 +31,7 @@ Toute la documentation et les explications sont **en français**.
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
 Installés en Phase 2 : Trivy 0.76.0.
+Installés en Phase 3 : Terraform 1.16.6 (dépôt HashiCorp), Ansible (core 2.16.3) et ansible-lint 6.17.2 (dépôts Ubuntu).
 Encore absents : kubectl, helm, k3s, terraform, ansible, trivy, gitleaks, semgrep, pandoc, marp, node.
 
 ## 3. Stack retenue et justification courte
@@ -112,7 +113,12 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] `.dockerignore` en liste blanche, Compose : read_only, cap_drop ALL, no-new-privileges
   - [x] Avant/après mesuré (docs/mesures.md M3) ; contrôle négatif bloquant vérifié
   - [x] Politique de sécurité : docs/securite.md
-- [ ] Phase 3 — Terraform et Ansible (+ installation terraform, ansible ; k3s via Ansible)
+- [x] **Phase 3 — Terraform et Ansible** (terminée le 2026-10-14)
+  - [x] Terraform 1.16.6, ansible-core 2.16.3, ansible-lint 6.17.2 installés (`install.sh iac`)
+  - [x] Module AWS (VPC, sous-réseau, SG, EC2, Flow Logs) : fmt, validate, Trivy OK — **jamais appliqué**
+  - [x] Module local (namespaces, PSA, quotas, LimitRange) : validate OK — application en Phase 4
+  - [x] Rôles Ansible common, ssh_hardening, firewall, k3s : lint production, `--check` OK
+  - [ ] (Phase 4) Exécution réelle d'Ansible (UFW, sysctl, k3s) et application de Terraform local
 - [ ] Phase 4 — Kubernetes et Helm (+ kubectl, helm)
 - [ ] Phase 5 — Pipeline CI DevSecOps (+ gitleaks, semgrep en local ; token GitHub à ce moment)
 - [ ] Phase 6 — GitOps avec Argo CD
@@ -134,6 +140,9 @@ set -a; . ../.env; set +a; DB_PASSWORD="$POSTGRES_PASSWORD" RUN_INTEGRATION=1 ..
 bash scripts/install.sh check        # prérequis Phase 0
 trivy image --config trivy.yaml plateforme-api:dev   # contrôle de vulnérabilités bloquant
 trivy config app/                    # Dockerfiles
+terraform fmt -recursive -check infra/terraform && terraform -chdir=infra/terraform/aws validate
+trivy config --config trivy.yaml infra/
+(cd infra/ansible && ansible-lint && ansible-playbook site.yml --check)
 docker run --rm hello-world          # moteur Docker fonctionnel
 docker compose version
 git status
@@ -155,4 +164,8 @@ git status
 | 2026-10-14 | Images : python 3.12.15, nginx 1.30.5 (branche stable), postgres 18.6-alpine3.24 | Tags précis relevés sur Docker Hub |
 | 2026-10-14 | Trivy : HIGH/CRITICAL bloquants, `ignore-unfixed` | Bloquer ce qui est corrigeable ; tracer le reste (docs/securite.md) |
 | 2026-10-14 | Debian slim plutôt qu'Alpine (Python) ou distroless | Roues glibc, Python 3.12 conservé, débogage possible ; distroless en perspective |
+| 2026-10-14 | Terraform local = socle Kubernetes (namespaces, PSA, quotas) | Terraform pour la plateforme, Helm/Argo pour les applications |
+| 2026-10-14 | k3s installé par Ansible (script au tag + SHA-256), pas par `curl \| sh` | Reproductibilité et intégrité |
+| 2026-10-14 | k3s durci : secrets-encryption, protect-kernel-defaults, audit log | Guide de durcissement CIS de k3s |
+| 2026-10-14 | k3s v1.36.5+k3s1 (canal stable au 2026-10-14) | Version stable figée |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

@@ -55,3 +55,50 @@ personnalisés (le profil seccomp par défaut de Docker reste appliqué).
 - `SecretStr` côté Python : le mot de passe n'apparaît ni dans `repr()` ni dans les logs.
 - Avant chaque commit : vérification que la valeur réelle du `.env` n'est pas dans l'index Git.
   Gitleaks automatisera ce contrôle en Phase 5.
+
+## 4. Infrastructure as Code (Terraform AWS)
+
+| Mesure | Implémentation |
+|---|---|
+| Administration restreinte | SSH et 6443 ouverts uniquement depuis `admin_cidr` (validation : `0.0.0.0/0` refusé) |
+| IMDSv2 obligatoire | `http_tokens = "required"`, hop limit 1 : vol d'identifiants via SSRF bloqué |
+| Disque chiffré | `encrypted = true` (gp3) |
+| Groupe de sécurité par défaut verrouillé | `aws_default_security_group` sans règle (CIS AWS 5.4) |
+| Pas d'IP publique automatique | `map_public_ip_on_launch = false`, IP publique explicite pour le seul nœud |
+| Traçabilité réseau | VPC Flow Logs → CloudWatch, rôle IAM limité au groupe de logs |
+| Étiquettes | `default_tags` (projet, environnement, ManagedBy) |
+
+### Exceptions IaC en vigueur
+
+| Règle Trivy | Ressource | Justification | Alternative de production |
+|---|---|---|---|
+| AWS-0104 (CRITICAL) — sortie vers 0.0.0.0/0 | Règles de sortie 80/443 | Le nœud doit joindre GHCR, les dépôts APT et GitHub, dont les IP changent ; seuls les ports 80/443 sont ouverts, DNS limité au résolveur du VPC | Proxy de sortie filtrant, VPC endpoints, NAT avec inspection |
+
+**Risque accepté (LOW, non bloquant, non masqué)** : AWS-0017, groupe de logs non chiffré par une clé
+KMS gérée par le client. CloudWatch Logs chiffre déjà au repos avec une clé gérée par AWS. Une clé
+KMS dédiée ajoute un coût mensuel, injustifié pour une démonstration.
+
+**Vérification de l'efficacité des exceptions** : le module a été scanné sans aucun commentaire
+`trivy:ignore`. Seule AWS-0104 se déclenchait. Les exceptions initialement prévues pour AWS-0107 et
+AWS-0009 ont été retirées, car elles ne correspondaient à aucun constat réel.
+
+## 5. Durcissement de l'hôte (Ansible) — périmètre « inspiré CIS »
+
+| Domaine | Appliqué | Référence |
+|---|---|---|
+| Mises à jour de sécurité automatiques | `unattended-upgrades` | CIS Ubuntu 1.9 |
+| Paramètres réseau (redirections ICMP, source routing, martians, syncookies) | sysctl | CIS Ubuntu 3.3.x |
+| ASLR, `dmesg_restrict`, pas de core dump setuid | sysctl | CIS Ubuntu 1.5.x |
+| Pare-feu : refus par défaut en entrée | UFW | CIS Ubuntu 3.5.1.x |
+| SSH : root interdit, clés uniquement, 3 essais, pas de redirections | drop-in sshd (si serveur SSH présent) | CIS Ubuntu 5.2.x |
+| k3s : Secrets chiffrés au repos | `secrets-encryption: true` | CIS Kubernetes 1.2.x (guide k3s) |
+| k3s : kubelet protégeant les paramètres noyau | `protect-kernel-defaults: true` | CIS Kubernetes 4.2.6 |
+| k3s : journal d'audit de l'API | politique Metadata, rotation | CIS Kubernetes 1.2.16–1.2.19 / 3.2.1 |
+| kubeconfig non lisible par les autres utilisateurs | mode 0600 | CIS Kubernetes 4.1.x |
+| Installation de k3s vérifiée | script figé au tag + SHA-256, binaire vérifié par le script | Chaîne d'approvisionnement |
+
+**Hors périmètre** (documenté, non appliqué) : partitionnement séparé (`/tmp`, `/var`), auditd et
+AIDE, AppArmor personnalisé, politique de mots de passe PAM, désactivation des modules noyau
+inutilisés, benchmark CIS complet avec un outil de conformité (kube-bench, Lynis, OpenSCAP). Ces
+mesures sont pertinentes pour un serveur de production, mais disproportionnées ou risquées pour une
+VM de bureau partagée avec l'environnement graphique.

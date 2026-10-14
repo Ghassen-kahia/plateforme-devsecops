@@ -1,0 +1,5 @@
+# Copier en terraform.tfvars (ignoré par Git) et adapter.
+region         = "eu-west-3"
+admin_cidr     = "203.0.113.10/32" # votre IP publique (curl -s https://ifconfig.me)/32
+ssh_public_key = "ssh-ed25519 AAAA... vous@machine"
+instance_type  = "t3.medium"

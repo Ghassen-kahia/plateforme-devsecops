@@ -1,0 +1,9 @@
+firewall_allow_ssh: true
+# Ports web exposés par Traefik (Ingress k3s)
+firewall_web_ports: [80, 443]
+# Sources autorisées sur l'API Kubernetes (6443) ; vide = port fermé depuis l'extérieur
+firewall_kube_api_sources: []
+# Réseaux internes k3s (documentation k3s, section UFW) : pods et services
+firewall_k3s_cidrs:
+  - 10.42.0.0/16
+  - 10.43.0.0/16

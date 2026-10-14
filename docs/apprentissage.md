@@ -315,3 +315,96 @@ docker builder prune -f                                       # libérer le cach
    Voir les perspectives : gain de sécurité réel, mais changement de version de Python et débogage plus
    difficile. J'ai préféré une base slim maîtrisée, une politique explicite et des mesures documentées,
    en gardant distroless comme amélioration suivante.
+
+---
+
+## Phase 3 — Terraform et Ansible
+
+### Terraform vs Ansible : complémentaires, pas concurrents
+
+| | Terraform | Ansible |
+|---|---|---|
+| Modèle | Déclaratif + **état** (`terraform.tfstate`) | Procédural (tâches ordonnées) et idempotent, **sans état** |
+| Force | Créer, modifier et détruire des ressources d'API (cloud, Kubernetes) | Configurer l'intérieur d'une machine (paquets, fichiers, services) |
+| Connaissance de l'existant | L'état + le `refresh` permettent de calculer un **plan** (diff) | Chaque module vérifie l'état actuel avant d'agir |
+| Suppression | Retirer une ressource du code la **détruit** | Retirer une tâche ne défait rien |
+
+Ici : Terraform crée la VM (AWS) ou le socle Kubernetes (local) ; Ansible configure l'OS et installe k3s.
+Le provisionnement par `user_data` a été écarté : la même procédure Ansible sert pour la VM locale
+et pour EC2, et elle est rejouable.
+
+### Concepts Terraform
+
+- **`.terraform.lock.hcl`** (commité) : fixe la version **et les sommes de contrôle** des providers.
+  `~> 6.68` autorise 6.68.x ou 6.x, mais le lock fige la version exacte jusqu'à `terraform init -upgrade`.
+- **`terraform init -backend=false`** : télécharge les providers sans configurer l'état distant.
+  C'est ce qui permet de valider sans identifiants AWS.
+- **`validate` ≠ `plan`** : `validate` vérifie la syntaxe et la cohérence des types, hors ligne.
+  `plan` interroge AWS (identifiants requis) pour calculer les changements.
+- **État distant (S3 + verrou)** : en équipe, un état local entraîne des conflits et une perte de
+  données. Le backend S3 avec `use_lockfile` empêche deux `apply` simultanés. L'état peut contenir des
+  secrets : il doit être chiffré et son accès restreint.
+- **`default_tags`** : toutes les ressources sont étiquetées, ce qui sert au suivi des coûts et à
+  l'identification du propriétaire.
+- **Validations de variables** : `admin_cidr = "0.0.0.0/0"` est refusé dès le `plan`. Le code
+  empêche ainsi l'erreur humaine la plus courante.
+
+### Concepts Ansible
+
+- **Idempotence** : relancer le playbook ne change rien si l'état est déjà atteint. Chaque tâche est
+  donc écrite avec un module déclaratif (`apt: state=present`, `sysctl`, `ufw`), pas avec `shell`.
+- **`--check --diff`** : exécution à blanc, qui montre ce qui changerait sans rien modifier.
+  Équivalent du `terraform plan`.
+- **Handlers** : exécutés une seule fois en fin de play, seulement si une tâche a notifié un
+  changement. Pour SSH, la validation (`sshd -t`) précède le redémarrage, ce qui évite de perdre l'accès
+  avec une configuration invalide.
+- **ansible-lint, profil `production`** : nommage des tâches, modules FQCN (`ansible.builtin.apt`),
+  permissions explicites (`mode`), pas de `command` sans `changed_when`.
+
+### Concept : chaîne d'approvisionnement de k3s
+
+`curl -sfL https://get.k3s.io | sh -` exécute un script non vérifié, dont la version peut changer
+d'un jour à l'autre. Ici, le script est téléchargé **au tag de version** et sa SHA-256 est vérifiée
+par `get_url` avant exécution. Le script vérifie ensuite la SHA-256 du binaire k3s. Limite : la
+somme du binaire provient de la même source GitHub. Elle protège contre une corruption, pas contre
+une compromission de la source. La vérification des signatures cosign des artefacts serait l'étape
+suivante.
+
+### Erreurs rencontrées — Phase 3
+
+| Problème | Cause | Solution |
+|---|---|---|
+| `--check` : « Could not find the requested service k3s » | En mode check, les tâches `command` sont sautées : `k3s_installed` n'avait pas de `rc`, et le handler s'exécutait à tort | `check_mode: false` sur la commande de lecture et `default(1)` dans la condition du handler |
+| Exceptions Trivy inutiles | Trivy 0.76 a renommé ses règles (`AVD-AWS-0104` → `AWS-0104`) ; les règles 0107 et 0009 ne se déclenchaient pas | Scan d'une copie sans exceptions, retrait des exceptions superflues, nouvel identifiant |
+| Hash du script k3s différent entre `get.k3s.io` et le tag | `get.k3s.io` sert la branche principale, qui évolue | Téléchargement au tag `v1.36.5+k3s1`, hash figé |
+
+### Questions d'entretien — Phase 3
+
+1. **Pourquoi ne pas avoir appliqué le module AWS ? Comment prouvez-vous qu'il fonctionne ?**
+   L'application crée des ressources facturées ; le projet est à coût nul. J'ai validé ce qui est
+   vérifiable sans compte : `fmt`, `validate` (cohérence des types et des références), scan Trivy
+   (aucun constat HIGH/CRITICAL non justifié) et une procédure documentée. Je suis honnête sur la
+   limite : seul un `plan`, puis un `apply`, prouverait le fonctionnement réel (quotas, AMI, disponibilité).
+2. **Que contient l'état Terraform, et pourquoi le protéger ?**
+   La correspondance entre le code et les identifiants réels des ressources, ainsi que tous leurs
+   attributs, y compris d'éventuels secrets (mots de passe de bases RDS, par exemple). Il faut un
+   backend chiffré, un accès restreint, un verrouillage, et ne jamais le commiter (`.gitignore`).
+3. **Que se passe-t-il si deux personnes lancent `terraform apply` en même temps ?**
+   Sans verrou, les deux lisent le même état et le second écrase l'écriture du premier. Résultat :
+   des ressources orphelines ou un état incohérent. Le verrou (S3 `use_lockfile`, ou DynamoDB
+   auparavant) sérialise les opérations.
+4. **Qu'est-ce que l'IMDSv2 et pourquoi l'imposer ?**
+   Le service de métadonnées (169.254.169.254) fournit des identifiants IAM temporaires à l'instance.
+   En v1, une simple requête GET suffit : une faille SSRF dans une application permet de les voler
+   (cas Capital One, 2019). La v2 exige un jeton obtenu par une requête PUT, et un hop limit de 1
+   empêche un conteneur de l'atteindre à travers un saut réseau.
+5. **(Compromis)** **Votre groupe de sécurité autorise la sortie vers 0.0.0.0/0, qui est un constat CRITICAL. Pourquoi l'accepter ?**
+   Le nœud doit télécharger des images (GHCR) et des paquets, depuis des IP qui changent. J'ai limité
+   la sortie aux ports 80/443, et le DNS au résolveur du VPC. Le restreindre davantage impose un proxy
+   de sortie ou des VPC endpoints, qui coûtent de l'argent et ajoutent de la complexité. L'exception est
+   localisée sur la ressource concernée, justifiée en commentaire et documentée, au lieu de
+   désactiver la règle globalement.
+6. **(Dépannage)** **Après l'activation d'UFW, les pods ne résolvent plus les noms DNS. Pourquoi ?**
+   CoreDNS tourne dans un pod. Le trafic des pods vers CoreDNS (réseau 10.42.0.0/16, service
+   10.43.0.10) passe par la pile réseau de l'hôte, et UFW le rejette s'il n'est pas autorisé. D'où les
+   règles explicites pour 10.42.0.0/16 et 10.43.0.0/16, issues de la documentation k3s.

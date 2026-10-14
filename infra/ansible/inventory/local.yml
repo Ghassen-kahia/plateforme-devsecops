@@ -1,0 +1,13 @@
+# Inventaire de la VM locale : Ansible s'exécute sur la machine elle-même (pas de SSH).
+all:
+  hosts:
+    k3s-local:
+      ansible_connection: local
+      ansible_python_interpreter: /usr/bin/python3
+  vars:
+    # VM de bureau : pas de mise à jour complète automatique en cours de projet
+    common_full_upgrade: false
+    # Aucun serveur SSH installé sur la VM : le port 22 reste fermé
+    firewall_allow_ssh: false
+    # L'API Kubernetes n'est utilisée que localement (127.0.0.1, non filtré par UFW)
+    firewall_kube_api_sources: []

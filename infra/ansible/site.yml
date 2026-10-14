@@ -1,0 +1,16 @@
+# Playbook principal : prépare un hôte Ubuntu et installe k3s.
+#   ansible-playbook site.yml                     # VM locale
+#   ansible-playbook -i inventory/aws.yml site.yml   # instance EC2
+#   ansible-playbook site.yml --tags firewall     # un seul rôle
+- name: Préparer et durcir l'hôte, installer k3s
+  hosts: all
+  become: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: ssh_hardening
+      tags: [ssh]
+    - role: firewall
+      tags: [firewall]
+    - role: k3s
+      tags: [k3s]

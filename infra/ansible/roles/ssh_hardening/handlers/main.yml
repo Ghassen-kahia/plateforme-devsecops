@@ -1,0 +1,10 @@
+# Les handlers s'exécutent dans l'ordre de définition : la validation précède le redémarrage.
+# Si `sshd -t` échoue, le redémarrage n'a pas lieu (pas de perte d'accès SSH).
+- name: Valider la configuration sshd
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Redémarrer sshd
+  ansible.builtin.service:
+    name: ssh
+    state: restarted

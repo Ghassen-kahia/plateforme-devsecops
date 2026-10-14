@@ -1,0 +1,6 @@
+# Géré par Ansible (rôle ssh_hardening) — ne pas modifier à la main.
+# Fichier préfixé « 10- » : sshd retient la PREMIÈRE valeur lue pour chaque directive, ce fichier
+# l'emporte donc sur les fichiers suivants (ex. 50-cloud-init.conf qui peut réactiver les mots de passe).
+{% for key, value in ssh_hardening_settings.items() %}
+{{ key }} {{ value }}
+{% endfor %}

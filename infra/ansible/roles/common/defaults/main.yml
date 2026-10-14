@@ -1,0 +1,32 @@
+common_full_upgrade: true
+common_packages:
+  - ca-certificates
+  - curl
+  - jq
+  - unattended-upgrades
+  - apt-listchanges
+
+# Paramètres noyau : exigés par k3s (protect-kernel-defaults) ou issus des recommandations CIS
+common_sysctl:
+  # Requis par Kubernetes / k3s
+  net.ipv4.ip_forward: 1
+  fs.inotify.max_user_instances: 512
+  fs.inotify.max_user_watches: 524288
+  # Requis par l'option k3s `protect-kernel-defaults` (guide de durcissement CIS de k3s)
+  vm.overcommit_memory: 1
+  vm.panic_on_oom: 0
+  kernel.panic: 10
+  kernel.panic_on_oops: 1
+  # Durcissement réseau (CIS Ubuntu 3.3.x)
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.tcp_syncookies: 1
+  # Durcissement noyau (CIS Ubuntu 1.5.x)
+  kernel.randomize_va_space: 2
+  kernel.dmesg_restrict: 1
+  fs.suid_dumpable: 0

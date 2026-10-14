@@ -1,0 +1,50 @@
+- name: Installer UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+# Règles d'autorisation posées AVANT l'activation, pour ne jamais couper un accès en cours
+- name: Autoriser SSH avec limitation de débit (anti force brute)
+  community.general.ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    comment: "SSH (limite)"
+  when: firewall_allow_ssh | bool
+
+- name: Autoriser le trafic web (Traefik)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: "web {{ item }}"
+  loop: "{{ firewall_web_ports }}"
+
+- name: Autoriser l'API Kubernetes depuis les sources d'administration
+  community.general.ufw:
+    rule: allow
+    port: "6443"
+    proto: tcp
+    src: "{{ item }}"
+    comment: "API Kubernetes"
+  loop: "{{ firewall_kube_api_sources }}"
+
+- name: Autoriser le trafic des réseaux de pods et de services k3s
+  community.general.ufw:
+    rule: allow
+    src: "{{ item }}"
+    comment: "k3s interne"
+  loop: "{{ firewall_k3s_cidrs }}"
+
+- name: Politique par défaut - refuser les entrées, autoriser les sorties
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    default: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Activer UFW avec journalisation
+  community.general.ufw:
+    state: enabled
+    logging: "low"

@@ -1,0 +1,12 @@
+# Exemple d'inventaire pour l'instance EC2 créée par infra/terraform/aws (non appliqué).
+# Copier en aws.yml et remplacer l'IP par la sortie `terraform output instance_public_ip`.
+all:
+  hosts:
+    k3s-aws:
+      ansible_host: 203.0.113.20
+      ansible_user: ubuntu
+  vars:
+    common_full_upgrade: true
+    firewall_allow_ssh: true
+    firewall_kube_api_sources: ["203.0.113.10/32"]   # IP de l'administrateur
+    k3s_tls_san: ["203.0.113.20"]

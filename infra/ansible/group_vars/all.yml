@@ -1,0 +1,6 @@
+# Variables communes à tous les hôtes (surchargées par l'inventaire si besoin)
+k3s_version: "v1.36.5+k3s1"
+# SHA-256 du script d'installation officiel à ce tag (vérifié par Ansible avant exécution)
+k3s_install_script_sha256: "46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152fbfad"
+# Utilisateur qui recevra le kubeconfig (~/.kube/config, permissions 0600)
+k3s_kubeconfig_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
