@@ -5,3 +5,4 @@ psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
 pydantic-settings==2.16.0
 prometheus-client==0.26.0
+pyyaml==5.3.1  # DÉMONSTRATION : CVE-2020-14343 (CRITICAL) — doit être bloqué
