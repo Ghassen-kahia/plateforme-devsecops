@@ -1078,3 +1078,27 @@ Une étape suivante serait de la rejouer dans une VM jetable (Vagrant/Multipass)
   est impossible.
 - Principe : une idée forte et un chiffre mesuré par diapositive ; dire « projet personnel » ; ne citer
   que des mesures de `docs/mesures.md`.
+
+---
+
+## Rapport final (captures réelles) — incidents révélés
+
+La préparation des captures d'écran a elle-même révélé trois défauts réels :
+
+| Problème | Cause | Solution |
+|---|---|---|
+| Colonne des cases à cocher très large dans l'interface | `input { flex: 1 }` s'appliquait aussi aux cases à cocher | Règle ciblée `#title`, déployée via CI → dev → promotion prod |
+| **Grafana inutilisable** (page en 4 min, probes en échec depuis environ 2 h, sans aucune alerte) | Bridé en permanence : 273m consommés pour une limite de 300m ; accès à sa base interne expirés | Limite portée à 1 cœur et 512 Mi : page en 0,1 s. **Leçon : superviser la supervision** |
+| `demo.sh panne` laissait dev en panne | Push du revert refusé (commit GitOps de la CI poussé entre-temps), arrêt sur `set -e` | Fonction `pousser()` : rebase et 5 tentatives ; revert ciblé sur le commit de panne |
+
+Outillage des captures : Chromium sans interface (Puppeteer, dans l'image `minlag/mermaid-cli`).
+Pièges rencontrés : le Chrome de Puppeteer est compilé pour glibc (`ENOENT` sur Alpine/musl), d'où
+l'usage du Chromium système ; la page de connexion de Grafana ne se stabilise jamais, d'où une
+authentification HTTP Basic ; les port-forwards meurent quand le pod ciblé est recréé, d'où le
+recours au proxy de l'API Kubernetes.
+
+**Question d'entretien — « Comment savez-vous que votre supervision fonctionne ? »**
+Ici, elle ne fonctionnait pas : Grafana était dégradé depuis deux heures sans qu'aucune alerte ne le
+signale. Il faut des alertes sur la pile de supervision elle-même (Grafana, Prometheus, Alertmanager
+indisponibles), un *dead man's switch* externe, et des limites de ressources fixées à partir de
+mesures (`kubectl top`, throttling CFS), pas d'estimations.

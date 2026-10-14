@@ -1,0 +1,64 @@
+% ---------------------------------------------------------------- Page de garde
+\begin{titlepage}
+\centering
+\newcommand{\logo}[2]{\IfFileExists{#1}{\includegraphics[height=2.6cm]{#1}}{\fbox{\parbox[c][2.4cm][c]{4.2cm}{\centering\color{gray}Logo #2}}}}
+\begin{minipage}[c]{0.45\textwidth}\raggedright\logo{../images/logo-rif.png}{RIF}\end{minipage}\hfill
+\begin{minipage}[c]{0.45\textwidth}\raggedleft\logo{../images/logo-esprit.png}{ESPRIT}\end{minipage}
+
+\vspace{1.4cm}
+{\large\scshape École Supérieure Privée d'Ingénierie et de Technologies --- ESPRIT\par}
+\vspace{1.6cm}
+{\Large\scshape Rapport de projet\par}
+\vspace{0.6cm}
+\rule{\textwidth}{1.2pt}\par\vspace{0.4cm}
+{\huge\bfseries\color{bleu} Plateforme DevSecOps\\[0.3cm] de déploiement continu sur Kubernetes\par}
+\vspace{0.3cm}
+{\large Intégration continue sécurisée, GitOps et supervision\par}
+\vspace{0.4cm}\rule{\textwidth}{1.2pt}\par
+\vspace{1.6cm}
+{\large Réalisé par\par}\vspace{0.2cm}
+{\LARGE\bfseries Ghassen KAHIA\par}
+\vspace{1.0cm}
+{\large Au sein de\par}\vspace{0.2cm}
+{\Large\bfseries RIF\par}{\large Rassemblement des Ingénieurs Francophones\par}
+\vspace{1.0cm}
+{\large Encadré par\par}\vspace{0.2cm}
+{\Large\bfseries M. Tawfik KESKES\par}
+\vfill
+{\large Année universitaire 2025--2026\par}
+\end{titlepage}
+
+% ---------------------------------------------------------------- Remerciements
+\thispagestyle{empty}
+\vspace*{2.5cm}
+\begin{center}{\Huge\bfseries\color{bleu} Remerciements}\end{center}
+\vspace{1.2cm}
+
+Avant de présenter ce travail, je tiens à exprimer ma sincère reconnaissance à toutes les personnes
+qui ont contribué à sa réalisation.
+
+Je remercie tout particulièrement \textbf{M. Tawfik KESKES}, mon encadrant, pour sa disponibilité, la
+qualité de ses conseils et la confiance qu'il m'a accordée tout au long de ce projet. Ses remarques
+m'ont aidé à garder une démarche rigoureuse, fondée sur la mesure plutôt que sur les suppositions.
+
+J'adresse également mes remerciements au \textbf{RIF --- Rassemblement des Ingénieurs Francophones}, qui
+m'a accueilli et m'a offert un cadre propice à la réalisation de ce travail.
+
+Mes remerciements vont aussi à l'ensemble du corps enseignant d'\textbf{ESPRIT}, pour la formation qu'il
+m'a apportée, ainsi qu'aux membres du jury, qui ont accepté d'évaluer ce travail.
+
+Enfin, je remercie ma famille et mes proches pour leur soutien constant et leurs encouragements.
+
+\vfill
+\begin{flushright}\textit{Ghassen KAHIA}\end{flushright}
+\clearpage
+
+% ---------------------------------------------------------------- Tables
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+\pagenumbering{arabic}

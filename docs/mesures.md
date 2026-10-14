@@ -327,6 +327,27 @@ et 20:04 (aucune ligne de journal). Elle a néanmoins permis de détecter l'abse
 
 - **Limites** : vérification non destructive (pas de réinstallation d'une VM vierge).
 
+## M11 — Exercice de panne n° 3 et correctif Grafana (rapport final)
+
+- **Date** : 2026-10-14, 22:19–22:27, dev, trafic 3 req/s (`demo.sh panne --oui`).
+
+| Jalon (depuis le push de la panne) | Délai |
+|---|---|
+| Première erreur utilisateur (base absente) | t+28 s |
+| `PlateformeBaseDeDonneesIndisponible` dans Alertmanager | t+61 s (+33 s après la 1re erreur) |
+| 3 alertes critiques dans Alertmanager | t+121 s (+93 s après la 1re erreur) |
+| Revert poussé (manuellement, après refus du push du script) → service rétabli | 107 s |
+
+| Grafana | Avant (limite 300m CPU / 384 Mi) | Après (1 CPU / 512 Mi) |
+|---|---|---|
+| CPU consommé | 273m (bridé) | 37m au repos |
+| Temps de réponse d'une page du tableau de bord | ≈ 240 s (journal Grafana) | 0,1 s (`curl`) |
+| Probes de readiness | 183 échecs en ≈ 112 min | prêt |
+
+| Tests (rapport final) | Résultat |
+|---|---|
+| `RUN_INTEGRATION=1 pytest --cov=api` | 20 réussis, couverture 99 % |
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |

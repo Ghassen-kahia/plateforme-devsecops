@@ -1,0 +1,23 @@
+% Mise en page du rapport (incluse dans le préambule LaTeX par Pandoc)
+\usepackage{fancyhdr}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\definecolor{bleu}{HTML}{1D4E89}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gray}Plateforme DevSecOps sur Kubernetes}
+\fancyhead[R]{\small\color{gray}\leftmark}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+% Les figures restent à l'endroit où elles sont citées
+\makeatletter\def\fps@figure{H}\makeatother
+\setlength{\parskip}{0.45em}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\small}
+\renewcommand{\arraystretch}{1.15}
+% Blocs de code en police réduite (les lignes longues sont coupées dans la source)
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},fontsize=\small}
+% Libellés français (redéfinis après le chargement de la langue)
+\AtBeginDocument{\renewcommand{\tablename}{Tableau}\renewcommand{\listtablename}{Liste des tableaux}\renewcommand{\listfigurename}{Liste des figures}}
