@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/component: database
 spec:
   serviceName: {{ include "plateforme.dbName" . }}
-  replicas: 1
+  replicas: {{ .Values.database.replicas }}
   selector:
     matchLabels:
       {{- include "plateforme.selector" (dict "root" . "component" "database") | nindent 6 }}

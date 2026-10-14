@@ -1,0 +1,20 @@
+{{- if .Values.monitoring.enabled }}
+# Prometheus (kube-prometheus-stack) collecte /metrics sur le Service de l'API.
+# La NetworkPolicy de l'API autorise déjà le namespace monitoring sur le port 8000.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "plateforme.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+{{- end }}

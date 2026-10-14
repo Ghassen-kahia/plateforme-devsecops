@@ -64,6 +64,8 @@ database:
   runAsUser: 10070
   storage: 1Gi
   storageClass: local-path    # fourni par k3s
+  # 1 en fonctionnement normal. 0 = arrêt volontaire (maintenance ou panne contrôlée), via Git.
+  replicas: 1
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits:   { cpu: 500m, memory: 512Mi }
@@ -87,6 +89,14 @@ revisionHistoryLimit: 5
 shutdown:
   preStopSleepSeconds: 5
   terminationGracePeriodSeconds: 30
+
+# Supervision livrée avec l'application (CRD de kube-prometheus-stack, namespace monitoring)
+monitoring:
+  enabled: true
+  scrapeInterval: 15s
+  alerts:
+    errorRatioThreshold: 0.05     # 5 % de réponses 5xx vues par l'utilisateur (Traefik)
+    latencyP95Seconds: 0.5
 
 networkPolicy:
   enabled: true

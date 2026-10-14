@@ -1,0 +1,68 @@
+{{- if .Values.monitoring.enabled }}
+{{- $ns := .Release.Namespace }}
+{{- $api := include "plateforme.apiName" . }}
+{{- $traefikSvc := printf "%s-%s-http@kubernetes" $ns (include "plateforme.frontendName" .) }}
+# Règles d'alerte de l'application, versionnées avec elle et déployées par Argo CD.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "plateforme.fullname" . }}-alertes
+  namespace: {{ $ns }}
+  labels:
+    {{- include "plateforme.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: plateforme.{{ $ns }}
+      rules:
+        # 1. Cause : la base ne répond plus aux vérifications de l'API
+        - alert: PlateformeBaseDeDonneesIndisponible
+          expr: min(app_database_up{namespace="{{ $ns }}"}) == 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL injoignable depuis l'API ({{ $ns }})"
+            description: "La readiness de l'API échoue sur la base depuis plus de 30 s : les pods sont retirés du Service."
+            runbook: "kubectl -n {{ $ns }} get pods,events ; kubectl -n {{ $ns }} logs statefulset/{{ include "plateforme.dbName" . }}"
+
+        # 2. Symptôme : plus aucun pod de l'API prêt à servir du trafic
+        - alert: PlateformeApiIndisponible
+          expr: |
+            sum(kube_deployment_status_replicas_available{namespace="{{ $ns }}", deployment="{{ $api }}"}) == 0
+            or absent(kube_deployment_status_replicas_available{namespace="{{ $ns }}", deployment="{{ $api }}"})
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Aucune réplique de l'API disponible ({{ $ns }})"
+            description: "Le service est indisponible pour les utilisateurs depuis plus d'une minute."
+            runbook: "kubectl -n {{ $ns }} describe deploy/{{ $api }} ; vérifier /ready et la base"
+
+        # 3. Expérience utilisateur : part des réponses 5xx au point d'entrée (Traefik).
+        #    Mesuré à l'Ingress car, l'API hors service, ses propres métriques ne voient pas les requêtes.
+        - alert: PlateformeTauxErreurs5xxEleve
+          expr: |
+            sum(rate(traefik_service_requests_total{service="{{ $traefikSvc }}", code=~"5.."}[2m]))
+              /
+            sum(rate(traefik_service_requests_total{service="{{ $traefikSvc }}"}[2m]))
+              > {{ .Values.monitoring.alerts.errorRatioThreshold }}
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Plus de {{ mulf .Values.monitoring.alerts.errorRatioThreshold 100 }} % d'erreurs 5xx pour les utilisateurs ({{ $ns }})"
+            description: "Taux actuel : {{ "{{" }} $value | humanizePercentage {{ "}}" }} sur 2 minutes."
+
+        # 4. Dégradation : latence p95 de l'API au-dessus du seuil
+        - alert: PlateformeLatenceP95Elevee
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{namespace="{{ $ns }}", route!="/metrics"}[5m]))
+            ) > {{ .Values.monitoring.alerts.latencyP95Seconds }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Latence p95 de l'API > {{ .Values.monitoring.alerts.latencyP95Seconds }} s ({{ $ns }})"
+            description: "p95 actuel : {{ "{{" }} $value | humanizeDuration {{ "}}" }}."
+{{- end }}

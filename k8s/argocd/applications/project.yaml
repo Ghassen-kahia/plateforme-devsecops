@@ -27,3 +27,5 @@ spec:
     - { group: networking.k8s.io, kind: Ingress }
     - { group: networking.k8s.io, kind: NetworkPolicy }
     - { group: bitnami.com, kind: SealedSecret }
+    - { group: monitoring.coreos.com, kind: ServiceMonitor }
+    - { group: monitoring.coreos.com, kind: PrometheusRule }

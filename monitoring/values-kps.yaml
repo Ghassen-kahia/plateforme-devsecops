@@ -1,0 +1,110 @@
+# kube-prometheus-stack 91.8.2 (Prometheus 3.15, Grafana 13.2.3, Alertmanager 0.34.1)
+# Profil réduit pour une VM à 2 vCPU, adapté à k3s.
+
+# --- k3s : composants du plan de contrôle intégrés au processus k3s ---------------
+# Ils n'exposent pas de cibles séparées : les superviser créerait des alertes TargetDown
+# permanentes (fausses alertes = perte de confiance dans l'alerting).
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeEtcd: { enabled: false }
+kubeProxy: { enabled: false }
+
+defaultRules:
+  rules:
+    # Règles liées aux composants désactivés ci-dessus
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+
+prometheus:
+  prometheusSpec:
+    retention: 24h            # rétention courte : disque et mémoire limités
+    retentionSize: 2GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    # Prendre en compte les ServiceMonitor / PrometheusRule de TOUS les namespaces
+    # (ceux de l'application sont livrés par son chart, via Argo CD)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 384Mi }
+      limits:   { cpu: 750m, memory: 1Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources: { requests: { storage: 3Gi } }
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits:   { cpu: 100m, memory: 128Mi }
+  # Aucun canal de notification externe (e-mail, Slack…) : il exigerait un compte et un secret.
+  # Les alertes sont consultables dans l'interface et l'API d'Alertmanager.
+  config:
+    route:
+      receiver: "null"
+      group_by: ["alertname", "namespace"]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+    receivers:
+      - name: "null"
+
+grafana:
+  # Le chart définit par défaut le mot de passe admin « prom-operator » (connu publiquement) :
+  # on utilise un Secret créé par monitoring/install.sh avec un mot de passe aléatoire.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: { cpu: 25m, memory: 128Mi }
+    limits:   { cpu: 300m, memory: 384Mi }
+  # Tableau de bord de l'application provisionné depuis Git (monitoring/dashboards/)
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: plateforme
+          folder: Plateforme
+          type: file
+          disableDeletion: true
+          editable: false
+          options:
+            path: /var/lib/grafana/dashboards/plateforme
+
+  # Métriques du point d'entrée (Traefik, fourni par k3s) : ce que l'utilisateur subit réellement,
+  # y compris les erreurs renvoyées quand l'API est hors service (invisibles pour l'API elle-même)
+  additionalPodMonitors:
+    - name: traefik
+      namespaceSelector: { matchNames: [kube-system] }
+      selector:
+        matchLabels: { app.kubernetes.io/name: traefik }
+      podMetricsEndpoints:
+        - port: metrics
+          path: /metrics
+          interval: 15s
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits:   { cpu: 100m, memory: 128Mi }
+
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 10m, memory: 24Mi }
+    limits:   { cpu: 100m, memory: 64Mi }
