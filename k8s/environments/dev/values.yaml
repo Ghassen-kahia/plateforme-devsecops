@@ -2,9 +2,8 @@
 # Le bloc `image` est mis à jour AUTOMATIQUEMENT par la CI (job update-gitops) à chaque
 # commit sur main : ne pas le modifier à la main.
 image:
-  registry: ""
-  tag: "0.1.0"
-
+  registry: "ghcr.io/ghassen-kahia"
+  tag: "sha-f7eae81e1cb5"
 ingress:
   host: dev.plateforme.local
 api:
