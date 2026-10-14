@@ -2,7 +2,7 @@
 # Promotion : le tag validé en dev est recopié ici par le workflow « promote » (déclenchement manuel).
 image:
   registry: "ghcr.io/ghassen-kahia"
-  tag: "sha-99ed335406e1"
+  tag: "sha-92dcf88f3c45"
 ingress:
   host: plateforme.local
 api:
