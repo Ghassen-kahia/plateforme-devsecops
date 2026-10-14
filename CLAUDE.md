@@ -129,6 +129,14 @@ docs/{apprentissage.md,mesures.md,architecture,rapport,presentation}
 scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
 ```
 
+## 7 ter. Rapport final de dépôt
+
+- Source : `docs/rapport/pfe/` (`rapport.md`, page de garde `garde.tex`, mise en page `entete.tex`).
+- Sorties : `docs/rapport/rapport-final.pdf` (52 pages, version de dépôt) et `rapport-final.docx`.
+- Régénérer : `bash scripts/build-rapport.sh` (Docker pandoc/latex). Logos : `docs/rapport/images/logo-rif.png`
+  et `logo-esprit.png` (cadres vides tant qu'ils sont absents). Section « Organisme d'accueil » à compléter.
+- Captures : `docs/rapport/images/` (réelles ; Grafana/Prometheus en UTC).
+
 ## 7 bis. État final du projet (2026-10-14)
 
 Toutes les phases 0 à 10 sont terminées. Livrables : dépôt public, pipeline vert, dev/prod via Argo CD,
