@@ -113,7 +113,7 @@ VM de bureau partagée avec l'environnement graphique.
 | Réseau | NetworkPolicy deny-all + flux explicites (DNS, Traefik→frontend, frontend→api, monitoring→api, api→db) | Matrice de 7 flux + contrôle positif |
 | Ressources | requests/limits sur chaque conteneur, ResourceQuota et LimitRange par namespace | Quota : 20 répliques demandées, 2 créées |
 | Secrets | Secret créé hors du chart (`existingSecret`), mot de passe généré, jamais affiché ; chiffré au repos par k3s (`secrets-encryption`) | `helm get values` ne contient aucun secret |
-| Secrets dans Git | **Pas encore** : Sealed Secrets prévu en Phase 6 | — |
+| Secrets dans Git | SealedSecret (portée strict), Phase 6 | Chiffré rejoué ailleurs : refusé |
 
 **Limites** : un Secret Kubernetes n'est qu'encodé en Base64 dans les manifestes, ce qui **n'est pas un chiffrement**.
 Le chiffrement au repos de k3s protège la base de données du cluster, pas l'accès via l'API : toute
@@ -145,3 +145,36 @@ expiration. Après la date, la règle redevient active et doit être réévalué
 - Aucun secret GitHub nécessaire pour le pipeline (GHCR et commit GitOps via `GITHUB_TOKEN` éphémère).
 - Base PostgreSQL de test : authentification `trust`, conteneur éphémère interne au runner (aucun
   mot de passe factice dans le dépôt).
+
+## 8. GitOps (Argo CD, Sealed Secrets)
+
+| Mesure | Implémentation |
+|---|---|
+| CI sans accès au cluster | Modèle pull : la CI écrit dans Git, seul Argo CD (dans le cluster) applique |
+| Périmètre Argo CD | AppProject : 1 dépôt source, 2 namespaces, aucune ressource cluster, liste blanche de types |
+| Dérives | self-heal (corrigées en 1,7 à 6,1 s), prune |
+| Secrets | Sealed Secrets, portée strict ; clé publique seule nécessaire pour chiffrer |
+| Interface Argo CD | Pas d'Ingress : `kubectl port-forward` (TLS auto-signé) ; terminal web désactivé (`exec.enabled: false`) ; SSO (Dex) désactivé |
+| Versions | Argo CD 3.5.4 : **exception à la règle des 2 semaines**, car 3.5.3 est affectée par 4 CVE critiques (GHSA-fmxq…, -m3vr…, -fw5c…, -9v9p…) |
+
+**Compte admin Argo CD** : mot de passe initial aléatoire dans le Secret `argocd-initial-admin-secret`
+(à récupérer soi-même, à changer, puis supprimer le Secret initial). Amélioration : SSO + RBAC.
+
+**Sauvegarde de la clé Sealed Secrets** (indispensable, hors Git, stockage chiffré) :
+`kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > cle-sealed-secrets.yaml`
+
+### Exception Gitleaks
+
+| Exception | Portée | Justification | Contrôles |
+|---|---|---|---|
+| Ligne `sealedPassword: "Ag…"` (≥ 300 caractères base64) | Toute ligne au format exact d'un chiffré kubeseal | Valeur chiffrée, conçue pour être publiée | Un `password:` en clair dans le même fichier → détecté ; `sealedPassword` court en clair → détecté |
+
+### Re-chiffrer un secret (rotation)
+
+```bash
+openssl rand -base64 24 | tr -d '/+=\n' | kubeseal --raw --scope strict \
+  --namespace plateforme-dev --name plateforme-db --from-file=/dev/stdin
+# Coller le résultat dans k8s/environments/dev/values.yaml (database.sealedPassword), commit, push.
+# Attention : changer le mot de passe exige aussi de le changer DANS PostgreSQL (ALTER ROLE),
+# sinon l'API ne pourra plus se connecter.
+```

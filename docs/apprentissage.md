@@ -707,3 +707,143 @@ Solutions en équipe :
    Cas réel : la version locale (Ubuntu) embarquait implicitement les collections, alors que la
    version pip de la CI ne les avait pas. Il fallait déclarer la dépendance cachée dans
    `requirements.yml`, figer les versions et reproduire l'environnement CI en local (venv) avant de pousser.
+
+---
+
+## Phase 6 — GitOps avec Argo CD et Sealed Secrets
+
+### Le principe GitOps
+
+1. **Déclaratif** : l'état voulu est décrit (chart + valeurs), pas une suite de commandes.
+2. **Versionné dans Git** : historique, revue, auteur, possibilité de `git revert`.
+3. **Tiré (pull), pas poussé (push)** : c'est un agent DANS le cluster (Argo CD) qui lit Git et applique.
+   La CI n'a **aucun accès au cluster** : pas de kubeconfig dans GitHub, surface d'attaque réduite.
+4. **Réconcilié en continu** : toute différence entre Git et le cluster est détectée et corrigée.
+
+### Flux complet obtenu
+
+```
+git push (code) → CI GitHub (tests, scans, build, GHCR) → commit CI : k8s/environments/dev/values.yaml
+                                                              │
+                         Argo CD (dans k3s) interroge Git toutes les 60 s ◄┘
+                                │ différence détectée → helm template + kubectl apply
+                                ▼
+                         plateforme-dev mis à jour (RollingUpdate, preStop)
+promote.yml (manuel) → commit : k8s/environments/prod/values.yaml → Argo CD → plateforme-prod
+```
+
+### Organisation Argo CD
+
+- **Application racine `plateforme-root`** (app of apps) : elle synchronise `k8s/argocd/applications/`.
+  Ajouter un environnement revient à ajouter un fichier par PR, sans aucune commande sur le cluster.
+- **AppProject `plateforme`** : sources limitées à CE dépôt, destinations limitées à `plateforme-dev`
+  et `plateforme-prod`, aucune ressource de niveau cluster, liste blanche des types d'objets.
+  Même un manifeste malveillant fusionné ne pourrait pas créer de ClusterRole.
+- **Synchronisation automatique** avec `prune` (ce qui est retiré de Git est supprimé) et `selfHeal`
+  (ce qui est modifié à la main est rétabli).
+- `ignoreDifferences` sur `spec.replicas` de l'API : en prod, le HPA pilote ce champ. Sans cette
+  exception, Argo CD et le HPA se battraient en permanence.
+- Argo CD lui-même est installé par Helm (`scripts/gitops-bootstrap.sh`) : c'est le **problème de
+  l'amorçage** (il faut bien installer l'outil GitOps avant qu'il ne gère quelque chose).
+
+### Sealed Secrets : des secrets dans Git, chiffrés
+
+```
+kubeseal (poste) ──chiffre avec la clé PUBLIQUE──► SealedSecret (commité dans Git)
+                                                        │ Argo CD l'applique
+contrôleur (cluster, clé PRIVÉE) ──déchiffre──► Secret Kubernetes ──► pod PostgreSQL / API
+```
+
+- Portée **strict** : le texte chiffré est lié au nom ET au namespace. Testé : rejoué ailleurs, il est
+  refusé (« no key could decrypt secret »).
+- Migration sans coupure : le mot de passe **existant** a été chiffré (PostgreSQL l'utilisait déjà),
+  directement du cluster vers kubeseal par un pipe, sans affichage. Empreinte SHA-256 identique avant et
+  après la reprise par le contrôleur.
+- **Limites** :
+  - la clé privée du contrôleur est le point critique : sans elle (cluster reconstruit), les
+    SealedSecret sont indéchiffrables. Il faut la sauvegarder hors du cluster, de façon sécurisée ;
+  - la rotation de la clé de scellement n'est pas une rotation des secrets : les anciens chiffrés
+    restent valides avec les anciennes clés ;
+  - toute personne qui peut lire les Secrets du namespace (RBAC) voit la valeur en clair ;
+  - alternatives : External Secrets Operator + Vault ou AWS Secrets Manager (secrets hors de Git,
+    rotation centralisée), SOPS (chiffrement de fichiers avec KMS ou age).
+
+### Trois rollbacks, trois niveaux
+
+| Niveau | Commande | Effet | Mesuré |
+|---|---|---|---|
+| GitOps (retenu) | `git revert <commit gitops>` + push | L'état désiré revient en arrière ; Argo CD applique ; historique conservé | 89 s, 0 erreur sur 1 460 requêtes |
+| Helm | `helm rollback` | **Plus utilisé** : Argo CD annulerait le retour arrière (self-heal) | Phase 4 |
+| Deployment | `kubectl rollout undo` | **À proscrire** : dérive, annulée par Argo CD | Phase 4 |
+
+Le bouton « Rollback » de l'interface Argo CD est désactivé quand la synchronisation automatique est
+active. C'est logique : le seul moyen de revenir en arrière durablement est de changer Git.
+**Après un rollback** : le prochain commit sur main redéploiera une nouvelle version ; la correction se
+fait par un nouveau commit (« fix forward »), le revert sert à stabiliser en attendant.
+
+### Incident : 502 pendant une mise à jour réussie (course à l'arrêt)
+
+- **Symptôme** : à la reprise par Argo CD (image locale → GHCR), 2 × 502 et 1 timeout sur 163 requêtes.
+- **Cause** : quand un pod est arrêté, Kubernetes envoie SIGTERM au conteneur **en parallèle** de son
+  retrait des endpoints. kube-proxy, Traefik et Nginx mettent un court instant à le savoir et envoient
+  encore quelques requêtes à un processus qui s'arrête. Corrélation : erreurs à l'horodatage exact des
+  événements `Killing`, base non redémarrée.
+- **Pourquoi la Phase 4 ne l'avait pas vu** : les tests de release défectueuse ne terminaient jamais
+  l'ancien pod. Un test ne couvre que ce qu'il exerce.
+- **Correction** : `lifecycle.preStop.sleep: 5 s` (action native, aucun binaire requis) et
+  `terminationGracePeriodSeconds: 30`.
+- **Vérification** : 0 erreur sur 939 requêtes (changement de configuration), 1 460 (rollback
+  d'image) et 938 (promotion prod).
+
+### Dérives corrigées (self-heal)
+
+| Modification manuelle | Corrigée en |
+|---|---|
+| `kubectl scale` frontend 1 → 3 | 1,7 s |
+| Suppression de la NetworkPolicy de PostgreSQL | 2,0 s |
+| ConfigMap modifiée (LOG_LEVEL) | 6,1 s |
+
+Argo CD surveille les objets via l'API Kubernetes (watch) : une dérive est vue immédiatement, sans
+attendre l'intervalle de 60 s, qui ne concerne que la comparaison avec **Git**.
+
+### Erreurs rencontrées — Phase 6
+
+| Problème | Cause | Solution |
+|---|---|---|
+| **Commit poussé malgré deux validations en échec** | Étapes chaînées avec `;` au lieu de `&&` | Arrêt immédiat, analyse, correctif ; la CI a bloqué le commit (pas d'image publiée). Validations désormais strictement chaînées |
+| Gitleaks : `sealedPassword` (chiffré) signalé | Heuristique d'entropie sur une valeur chiffrée publiable | Exception sur le format exact d'un chiffré kubeseal |
+| Première exception Gitleaks trop large | Le critère `paths` faisait ignorer tout le fichier | Détecté par contrôle positif ; critère retiré |
+| Trivy local : Containerfile de test (HIGH) | Collections Ansible téléchargées scannées | `skip-dirs: infra/ansible/collections` |
+| Chart Sealed Secrets introuvable (404) | Projet déplacé vers `bitnami/sealed-secrets` | Nouvelle URL de dépôt Helm |
+| Argo CD 3.5.3 (règle des 2 semaines) | 4 CVE critiques corrigées en 3.5.4 | **Exception à la règle** : correctif de sécurité prioritaire → 3.5.4 |
+| Contrôleur ApplicationSet actif malgré `enabled: false` | Clé inexistante dans ce chart | `applicationSet.replicas: 0` |
+| `git revert` sans argument | `&` en fin de chaîne `&&` : tout s'exécutait dans un sous-shell | Étapes séparées ; dépôt vérifié intact |
+| 2 × 502 + 1 timeout pendant une mise à jour | Course SIGTERM / endpoints | preStop sleep (voir l'incident) |
+
+### Questions d'entretien — Phase 6
+
+1. **Push vs pull : pourquoi Argo CD plutôt qu'un `kubectl apply` dans la CI ?**
+   En mode push, la CI détient des identifiants d'administration du cluster : une fuite ou une action
+   compromise donne accès à la production. En mode pull, seul Argo CD (dans le cluster) agit, et la CI
+   ne fait qu'écrire dans Git. On gagne aussi la détection des dérives et un historique complet dans Git.
+2. **Comment gérez-vous les secrets en GitOps ?**
+   Avec Sealed Secrets : chiffrement asymétrique, texte chiffré commitable et lié à un nom et un namespace.
+   Je connais ses limites (clé privée à sauvegarder, pas de rotation automatique). En entreprise, je
+   regarderais External Secrets Operator avec Vault ou AWS Secrets Manager.
+3. **Quelqu'un fait un `kubectl edit` en production. Que se passe-t-il ?**
+   Argo CD détecte la différence et la rétablit en quelques secondes (mesuré : 1,7 à 6,1 s), et
+   l'événement est visible. Pour changer quelque chose, il faut passer par Git, avec revue et historique.
+   En cas d'urgence, on peut suspendre l'auto-sync, mais c'est une décision tracée.
+4. **Argo CD vs Flux ?**
+   Les deux sont des projets CNCF diplomés. Argo CD offre une interface web riche, des AppProjects pour
+   le multi-équipes et le pattern « app of apps ». Flux est plus modulaire (contrôleurs séparés),
+   s'intègre nativement à SOPS et automatise les mises à jour d'images, mais n'a pas d'interface
+   officielle. J'ai choisi Argo CD pour sa visibilité pédagogique.
+5. **(Compromis)** **Pourquoi l'état GitOps est-il dans le même dépôt que le code ?**
+   Pour éviter un secret supplémentaire (deploy key) : la CI écrit avec le `GITHUB_TOKEN`. Le prix : un
+   historique mélangé, et l'impossibilité de protéger `main` avec des checks obligatoires (le bot pousse
+   directement). En équipe, je séparerais les dépôts.
+6. **(Dépannage)** **Des 502 apparaissent à chaque déploiement réussi. Pourquoi, et comment le prouver ?**
+   Voir l'incident : corréler les erreurs avec les événements `Killing`, écarter les autres causes
+   (base stable), puis corriger avec preStop et **mesurer de nouveau** sous trafic (0 erreur sur plus de
+   3 300 requêtes, sur trois déploiements).

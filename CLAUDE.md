@@ -31,6 +31,7 @@ Toute la documentation et les explications sont **en français**.
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
 Installés en Phase 2 : Trivy 0.76.0.
+Installés en Phase 6 : kubeseal 0.40.0 (release vérifiée), Sealed Secrets 0.40.0 et Argo CD v3.5.4 (Helm, `scripts/gitops-bootstrap.sh`).
 Installés en Phase 5 : gh 2.102.0 (dépôt APT GitHub), gitleaks 8.30.1 et actionlint 1.7.12 (releases vérifiées), shellcheck 0.9.0 (Ubuntu), semgrep 1.178.0 (~/.venvs/semgrep). Trivy remplacé par le binaire 0.74.0 figé.
 Installés en Phase 4 : k3s v1.36.5+k3s1 (Ansible), kubectl 1.36.5 (pkgs.k8s.io), Helm 4.3.0 (dépôt Helm).
 Installés en Phase 3 : Terraform 1.16.6 (dépôt HashiCorp), Ansible (core 2.16.3) et ansible-lint 6.17.2 (dépôts Ubuntu).
@@ -74,12 +75,21 @@ CPU : 2 vCPU est juste. Stratégie : requests/limits partout, Prometheus rétent
 - Images : `ghcr.io/ghassen-kahia/plateforme-{api,frontend}:sha-<12>` (publiques).
 - La CI pousse sur main (commits `chore(gitops)`) : faire `git pull --rebase` avant de travailler.
 
+## 4 quater. GitOps — règles d'exploitation
+
+- NE PLUS utiliser `helm upgrade` ni `kubectl apply/edit/scale` sur plateforme-dev/prod : Argo CD annule.
+  Tout changement passe par Git (`k8s/environments/<env>/values.yaml` ou le chart).
+- Rollback : `git revert <commit chore(gitops)>` puis push.
+- Promotion prod : `gh workflow run promote.yml` (option `-f tag=sha-…`).
+- Interface : `kubectl -n argocd port-forward svc/argocd-server 8443:443` → https://localhost:8443 (admin).
+- Argo CD et Sealed Secrets eux-mêmes : `scripts/gitops-bootstrap.sh` (Helm).
+
 ## 4 bis. Accès local
 
 - dev : `http://dev.plateforme.local` ; prod : `http://plateforme.local` (Traefik sur 80).
   Sans modifier /etc/hosts : `curl --resolve <hôte>:80:127.0.0.1 http://<hôte>/`.
-- Images locales importées dans k3s : `docker save … | sudo k3s ctr -n k8s.io images import -` (avant GHCR).
-- Secrets `plateforme-db` créés à la main dans chaque namespace (mot de passe aléatoire, non stocké).
+- Images : GHCR (`ghcr.io/ghassen-kahia/…:sha-<12>`) pour dev et prod. Les images locales 0.1.0 ne servent plus.
+- Secrets `plateforme-db` : désormais générés par les SealedSecret (valeurs d'environnement chiffrées).
 - Stack Compose arrêtée (`docker compose stop`), volume conservé.
 
 ## 5. Risques identifiés
@@ -154,7 +164,13 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] PR #1 (secret factice) bloquée par Gitleaks, PR #2 (pyyaml 5.3.1) bloquée par Trivy ; fermées sans fusion
   - [x] Correctif : périmètre Gitleaks par événement + scan complet hebdomadaire
   - [ ] Limite : pas de protection de branche (incompatible avec le push GitOps direct) — documentée
-- [ ] Phase 6 — GitOps avec Argo CD
+- [x] **Phase 6 — GitOps avec Argo CD** (terminée le 2026-10-14)
+  - [x] Sealed Secrets 0.40.0 + kubeseal ; mot de passe PostgreSQL existant scellé (portée strict)
+  - [x] Argo CD v3.5.4 (exception sécurité à la règle des 2 semaines), app of apps, AppProject restreint
+  - [x] Reprise des releases Helm sans coupure (prod) ; métadonnées Helm supprimées
+  - [x] Push → dev en 189 s ; config Git → dev en 49 s ; rollback `git revert` en 89 s ; promotion prod en 84 s
+  - [x] Self-heal : 3 dérives corrigées en 1,7 à 6,1 s
+  - [x] Incident 502 au rolling update corrigé (preStop) : 0 erreur sur 3 337 requêtes
 - [ ] Phase 7 — Supervision
 - [ ] Phase 8 — Documentation professionnelle
 - [ ] Phase 9 — Rapport (pandoc)
@@ -218,4 +234,9 @@ git status
 | 2026-10-14 | Actions GitHub épinglées par SHA, permissions `{}` par défaut | Moindre privilège, immuabilité |
 | 2026-10-14 | État GitOps dans ce dépôt (`k8s/environments/`), mis à jour par `GITHUB_TOKEN` | Aucun secret supplémentaire ; dépôt séparé = alternative documentée |
 | 2026-10-14 | Tag d'image `sha-<12>` | Traçabilité commit ↔ image, rollback sans ambiguïté |
+| 2026-10-14 | Argo CD 3.5.4 malgré la règle des 2 semaines | 3.5.3 vulnérable (4 CVE critiques) : un correctif de sécurité prime |
+| 2026-10-14 | App of apps + AppProject restreint | GitOps de bout en bout, moindre privilège pour Argo CD |
+| 2026-10-14 | Sealed Secrets (portée strict) | Secrets versionnés sans service externe payant |
+| 2026-10-14 | preStop sleep 5 s natif | Course SIGTERM / endpoints mesurée et corrigée |
+| 2026-10-14 | Toujours chaîner les validations avec `&&` avant commit | Un commit est parti malgré un échec (`;`) |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |

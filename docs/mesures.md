@@ -228,6 +228,42 @@ la disponibilité dans le cluster sera mesuré avec Argo CD (Phase 6).
 - **Limites** : 2 runs seulement ; les durées varient selon la charge des runners GitHub et l'état du
   cache (pip, couches Docker `type=gha`).
 
+## M8 — GitOps : déploiement, dérive, rollback (Phase 6)
+
+- **Date** : 2026-10-14 — Argo CD v3.5.4 (chart 10.9.7), Sealed Secrets 0.40.0, réconciliation Git 60 s.
+- **Méthode** : sonde HTTP horodatée toutes les 0,3 s sur `/api/version` via l'Ingress, pendant toute
+  l'opération ; délais mesurés avec `date +%s` entre le `git push` (ou le déclenchement) et la première
+  réponse de la nouvelle version.
+
+| Scénario | Délai | Requêtes / erreurs |
+|---|---|---|
+| Amorçage (Sealed Secrets + Argo CD + app racine) | 54 s, puis applications Synced/Healthy ≈ 30 s | — |
+| Reprise des releases Helm par Argo CD — prod (sans changement) | — | 169 / **0** |
+| Reprise — dev (passage à l'image GHCR, **avant preStop**) | — | 163 / **3** (2 × 502, 1 timeout) |
+| **Push du code → nouvelle version servie en dev** (CI 145 s comprise) | **189 s** | — |
+| Push d'une configuration (LOG_LEVEL) → active en dev (sans CI) | **49 s** | 939 / **0** |
+| Rollback GitOps (`git revert` du commit d'image) → ancienne version servie | **89 s** | 1 460 / **0** |
+| Promotion prod (`promote.yml`) → nouvelle version servie en prod | **84 s** | 938 / **0** |
+| Dérive : `kubectl scale` | corrigée en 1,7 s | — |
+| Dérive : NetworkPolicy supprimée | corrigée en 2,0 s | — |
+| Dérive : ConfigMap modifiée | corrigée en 6,1 s | — |
+
+**Comparaison avec le déploiement manuel (M5)** : 84 s de commandes enchaînées par un opérateur, sans
+tests ni scans, contre 189 s de bout en bout **sans intervention**, avec lint, tests, Gitleaks, Semgrep,
+Trivy (×3), SBOM, publication et traçabilité Git.
+
+| Consommation avec Argo CD et Sealed Secrets | Valeur |
+|---|---|
+| Nœud (`kubectl top node`) | 255m CPU (12 %), 4 786 Mi |
+| Argo CD (4 pods) | ≈ 241 Mi (contrôleur 168 Mi) |
+| Contrôleur Sealed Secrets | 33 Mi |
+| RAM VM disponible | 6,3 Gi |
+| Disque utilisé | 43 Go / 79 Go |
+
+- **Limites** : le délai de détection par Argo CD dépend de la phase du cycle de 60 s au moment du
+  push (une mesure peut varier de 0 à 60 s) ; une seule mesure par scénario ; pas de webhook (VM non
+  joignable depuis GitHub).
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
@@ -237,6 +273,6 @@ la disponibilité dans le cluster sera mesuré avec Argo CD (Phase 6).
 | Temps de déploiement manuel (Helm) | 4 | mesuré (M5) |
 | Consommation CPU/RAM du cluster | 4, 6, 7 | Phase 4 mesurée (M5) |
 | Durée du pipeline CI | 5 | mesuré (M7) |
-| Délai entre le push et la nouvelle version disponible | 6 | à mesurer |
-| Temps de rollback (GitOps et Deployment) | 6 | à mesurer |
+| Délai entre le push et la nouvelle version disponible | 6 | mesuré (M8) : 189 s |
+| Temps de rollback (GitOps et Deployment) | 6 | mesuré (M5, M8) |
 | Temps de détection d'une panne | 7 | à mesurer |
