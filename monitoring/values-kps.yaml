@@ -105,6 +105,8 @@ kube-state-metrics:
     limits:   { cpu: 100m, memory: 128Mi }
 
 prometheus-node-exporter:
+  # Limite relevée de 100m à 250m : bridé 48 % du temps (alerte CPUThrottlingHigh, mesure
+  # container_cpu_cfs_throttled_periods_total), au risque de rater des collectes.
   resources:
-    requests: { cpu: 10m, memory: 24Mi }
-    limits:   { cpu: 100m, memory: 64Mi }
+    requests: { cpu: 20m, memory: 24Mi }
+    limits:   { cpu: 250m, memory: 64Mi }

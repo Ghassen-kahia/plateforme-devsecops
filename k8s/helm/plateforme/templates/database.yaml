@@ -45,15 +45,20 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret }}
                   key: password
+          # Readiness : pg_isready vérifie que PostgreSQL accepte les connexions (protocole réel).
+          # Probe « exec » = création d'un processus dans le conteneur à chaque essai (coûteux) :
+          # période de 10 s plutôt que 5 s.
           readinessProbe:
             exec:
               command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
-            periodSeconds: 5
-          livenessProbe:
-            exec:
-              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
-            initialDelaySeconds: 30
             periodSeconds: 10
+          # Liveness : simple test TCP (aucun processus créé). Suffisant pour détecter un processus
+          # bloqué ou arrêté ; la vérification fine reste assurée par la readiness.
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 30
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.database.resources | nindent 12 }}
           securityContext:
