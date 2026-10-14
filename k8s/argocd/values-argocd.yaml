@@ -20,7 +20,8 @@ dex:
 notifications:
   enabled: false
 applicationSet:
-  enabled: false          # pattern « app of apps » retenu (plus simple à expliquer)
+  # Pas de clé `enabled` dans ce chart (constaté : le contrôleur tournait malgré `enabled: false`)
+  replicas: 0             # pattern « app of apps » retenu (plus simple à expliquer)
 
 controller:
   resources:

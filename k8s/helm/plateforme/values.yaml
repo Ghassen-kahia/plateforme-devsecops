@@ -80,6 +80,14 @@ updateStrategy:
   maxUnavailable: 0
 revisionHistoryLimit: 5
 
+# Arrêt propre d'un pod : Kubernetes envoie SIGTERM au conteneur EN MÊME TEMPS qu'il le retire des
+# endpoints du Service ; ce retrait se propage avec un léger délai (kube-proxy, Traefik, Nginx).
+# Le preStop fait patienter le conteneur pour qu'aucune requête n'arrive sur un processus arrêté
+# (constaté sans lui : 2 × 502 et 1 timeout pendant une mise à jour sous trafic).
+shutdown:
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+
 networkPolicy:
   enabled: true
   # Namespace et labels du contrôleur Ingress autorisé à joindre le frontend

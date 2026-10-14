@@ -25,6 +25,7 @@ spec:
     spec:
       serviceAccountName: {{ include "plateforme.fullname" . }}
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -51,6 +52,11 @@ spec:
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 5
+          lifecycle:
+            preStop:
+              # Action native de Kubernetes (aucun binaire « sleep » requis dans l'image)
+              sleep:
+                seconds: {{ .Values.shutdown.preStopSleepSeconds }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           securityContext:

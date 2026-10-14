@@ -30,6 +30,7 @@ spec:
     spec:
       serviceAccountName: {{ include "plateforme.fullname" . }}
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -68,6 +69,11 @@ spec:
             periodSeconds: {{ .Values.api.probes.readiness.periodSeconds }}
             timeoutSeconds: {{ .Values.api.probes.readiness.timeoutSeconds }}
             failureThreshold: {{ .Values.api.probes.readiness.failureThreshold }}
+          lifecycle:
+            preStop:
+              # Action native de Kubernetes (aucun binaire « sleep » requis dans l'image)
+              sleep:
+                seconds: {{ .Values.shutdown.preStopSleepSeconds }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           securityContext:
