@@ -1,0 +1,40 @@
+# Valeurs Helm d'Argo CD (chart argo/argo-cd 10.9.7 = Argo CD v3.5.4).
+# Empreinte réduite pour une VM à 2 vCPU : composants non utilisés désactivés, ressources bornées.
+global:
+  domain: argocd.local
+
+configs:
+  cm:
+    # Intervalle de comparaison Git ↔ cluster (défaut : 180 s). Pas de webhook possible :
+    # GitHub ne peut pas joindre une VM locale, on interroge donc Git plus souvent.
+    timeout.reconciliation: 60s
+    # Pas de terminal web dans les pods depuis l'interface (surface d'attaque inutile)
+    exec.enabled: "false"
+  params:
+    # Pas d'Ingress : interface accessible uniquement via kubectl port-forward (TLS auto-signé)
+    server.insecure: false
+
+# Composants non nécessaires ici
+dex:
+  enabled: false          # SSO non utilisé (compte admin local)
+notifications:
+  enabled: false
+applicationSet:
+  enabled: false          # pattern « app of apps » retenu (plus simple à expliquer)
+
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 768Mi }
+server:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+repoServer:
+  resources:
+    requests: { cpu: 20m, memory: 96Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+redis:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits:   { cpu: 100m, memory: 128Mi }

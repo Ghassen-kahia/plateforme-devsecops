@@ -1,0 +1,35 @@
+# Environnement dev : chart Helm du dépôt + valeurs de k8s/environments/dev.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plateforme-dev
+  namespace: argocd
+spec:
+  project: plateforme
+  source:
+    repoURL: https://github.com/Ghassen-kahia/plateforme-devsecops.git
+    targetRevision: main
+    path: k8s/helm/plateforme
+    helm:
+      # Même nom de release qu'en Phase 4 : Argo CD reprend les ressources existantes
+      releaseName: plateforme-dev
+      valueFiles:
+        - ../../environments/dev/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: plateforme-dev
+  syncPolicy:
+    automated:
+      prune: true      # une ressource retirée de Git est supprimée du cluster
+      selfHeal: true   # une modification manuelle du cluster est annulée
+    syncOptions:
+      - CreateNamespace=false   # namespaces gérés par Terraform (PSA, quotas)
+    retry:
+      limit: 3
+      backoff: { duration: 10s, factor: 2, maxDuration: 1m }
+  # Le nombre de répliques de l'API est piloté par le HPA en prod : ne pas le considérer comme une dérive
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: plateforme-dev-api
+      jsonPointers: [/spec/replicas]

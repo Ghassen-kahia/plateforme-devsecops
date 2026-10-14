@@ -1,0 +1,29 @@
+# Projet Argo CD : périmètre autorisé pour les applications de la plateforme (moindre privilège).
+# Même si un fichier de l'application était modifié par erreur ou malveillance, Argo CD refuserait
+# de déployer depuis un autre dépôt, dans un autre namespace, ou des ressources de niveau cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: plateforme
+  namespace: argocd
+spec:
+  description: Application de démonstration de la plateforme DevSecOps
+  sourceRepos:
+    - https://github.com/Ghassen-kahia/plateforme-devsecops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: plateforme-dev
+    - server: https://kubernetes.default.svc
+      namespace: plateforme-prod
+  # Aucune ressource de niveau cluster (ClusterRole, CRD, Namespace…) : gérées par Terraform/Helm
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - { group: "", kind: ConfigMap }
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: apps, kind: Deployment }
+    - { group: apps, kind: StatefulSet }
+    - { group: autoscaling, kind: HorizontalPodAutoscaler }
+    - { group: networking.k8s.io, kind: Ingress }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: bitnami.com, kind: SealedSecret }

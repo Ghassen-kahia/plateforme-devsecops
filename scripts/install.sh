@@ -8,6 +8,7 @@
 #   sudo bash scripts/install.sh iac       # Phase 3 : Terraform, Ansible, ansible-lint
 #   sudo bash scripts/install.sh k8s       # Phase 4 : kubectl (version alignée sur k3s), Helm
 #   sudo bash scripts/install.sh ci        # Phase 5 : gh, gitleaks, actionlint (+ semgrep en venv utilisateur)
+#   sudo bash scripts/install.sh gitops    # Phase 6 : kubeseal (CLI Sealed Secrets)
 #   sudo bash scripts/install.sh check     # Vérification (sans sudo possible)
 #
 # Principes :
@@ -159,6 +160,14 @@ install_ci_tools() {
     "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "actionlint_${ACTIONLINT_VERSION}_checksums.txt" actionlint
 }
 
+KUBESEAL_VERSION="0.40.0"   # aligné sur le contrôleur (chart sealed-secrets 2.20.0)
+
+install_gitops_tools() {
+  log "Installation de kubeseal ${KUBESEAL_VERSION} (release GitHub, SHA-256 vérifiée)"
+  install_github_release bitnami/sealed-secrets "v${KUBESEAL_VERSION}" \
+    "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz" "sealed-secrets_${KUBESEAL_VERSION}_checksums.txt" kubeseal
+}
+
 check() {
   log "Vérification des prérequis"
   local ok=0
@@ -202,11 +211,16 @@ case "${1:-}" in
     install_ci_tools
     gh --version | head -1; gitleaks version; actionlint -version | head -1
     ;;
+  gitops)
+    require_root
+    install_gitops_tools
+    kubeseal --version
+    ;;
   check)
     check
     ;;
   *)
-    echo "Usage : sudo bash $0 base|scan|iac|k8s|ci  |  bash $0 check"
+    echo "Usage : sudo bash $0 base|scan|iac|k8s|ci|gitops  |  bash $0 check"
     exit 2
     ;;
 esac

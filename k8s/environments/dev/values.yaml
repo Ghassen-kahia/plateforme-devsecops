@@ -10,3 +10,6 @@ api:
   logLevel: DEBUG
 database:
   storage: 512Mi
+  # Mot de passe chiffré (kubeseal, portée strict : plateforme-db / plateforme-dev).
+  # Re-chiffrer : voir docs/securite.md (section Sealed Secrets)
+  sealedPassword: "AgCtBvpn7cuUiP/50tItNp2Q+x2pMAHUi5ZyLYkB7NODt7Uu+RzF40MP/y/1PGCyv/45YIwbIEkhpXF0MfmuKNDU6+ZiBcz7XcrgzaEZbBTgjA5dVx6TxS0d0i+mQRnDr7O3gzirRXUErjLSSlopf6keR7QYynfdck49ExMopFrgGufNRfNpJhR2GJajR8bFJMmUPxxb428kRkuoNHiX+8rtYtrvEpi350IVZCRMISQfipMCt7ohnFjSvgzMzAfA/IyeTFEAZEztcErmzLsDyjyq6dum0ls6z4HY7G735BYHR9G+QPT5aU5ZJSSY9B4dq37Fs+xcEb23SQ/nVikU5WxHt7j8oSh+67ioSgDBGRT+M55CpFs2WG6uaMlQhDg+Z1yXFnGR4d+GM9l/QNkq2STBgNdfRK85WRI6SkXWC7JT753gRiJNnnaNPdswRN/MSFfThID+d0mqV7pu6UpOX5Au/1hf0juxy4HTurq2cBDVr0tMw0DERqo3aXzkDUNfMUlfbj/kv6KUdoK3anrQ78KRRbQwZeV1k5sZ+tGU/ZsrUkHW5w9o4VjzY+2Dnpdzq6t98Den77P6C7eWB+lCn3xcA4ioCDXOmOtwYDfClDVXTKtZuZ+DnXvtzCcXHazBTnAscBLsPh0etpzaWq/XO2HA3FjWFhp5l3iMghvwGJmfuuo4zgBwxHMCJG03HH03O+Q6QeaCVUomAaU6QL1heDz90ALfXjAO61+lzAlaoAo="

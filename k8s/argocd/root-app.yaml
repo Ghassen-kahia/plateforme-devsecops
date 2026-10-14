@@ -1,0 +1,21 @@
+# Application racine (« app of apps ») : Argo CD synchronise le répertoire k8s/argocd/applications,
+# qui contient le projet et les Applications de chaque environnement. Ajouter un environnement =
+# ajouter un fichier dans ce répertoire (revue de code), sans commande manuelle sur le cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plateforme-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Ghassen-kahia/plateforme-devsecops.git
+    targetRevision: main
+    path: k8s/argocd/applications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

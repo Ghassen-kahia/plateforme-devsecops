@@ -13,3 +13,8 @@ api:
     maxReplicas: 4
 frontend:
   replicas: 2
+
+database:
+  # Mot de passe chiffré (kubeseal, portée strict : plateforme-db / plateforme-prod).
+  # Re-chiffrer : voir docs/securite.md (section Sealed Secrets)
+  sealedPassword: "AgBQbSXaEYhZMONa/rMNnLkvcq74QieP0JQox6VjyYvmdx/7huZ8LBg5qXXtnZzbgC6DhKXJzHzW4VbCzbZuKDjenwD93Xhri0sQEgUnLHsmAt9JxYHnMDkH7L3FJKXgyzSoi+/7OC245PWC0kM65ugtDo/OrdITKaP92Xt523b5EVusUJ3if9QYrjSa/6vkKGfZH3at9Wdo/QJM7YGWclk0RjOtF0AObNLXtqrkXVDyXUvBOj8tA7m8+AfHW2hpq1KYejCvFW5FcWxNpjKGDdAVgoBhO2r0689d/8cQzQCSLxorSk16ilrpDCQe9e3WfsqeOmgQeJZeIeWVbOeOpFYT+CSHriu9Ak/ZBQFj4PQCJSyKU48lWT6AchVkq9aywfXSeO1X1L0XObGSCqTZVO17TzqaZMzHCU/xc+DA2596OxHhGS8Sdynjf2xAg4ft+CQKZo0DO3P5aUmCHiUynIgG/8JEuNfgS0mtNZATqzN5Ye1cblJ0vtn+jGhTUIGqB4ydZsMtoeyIDTBAgjQF8UN/aFAz865eqp5tu1/IfJuUrfOm71cdqf9G8jVTf/bF8QumRYtXLX36cNtTffd/qy7sLCp271xsO3EI5E3pF7mliUUXhedZNoJO5M7Sm/vG4hnV16CvZOA+1d7e4+417Av039ePlQOaIVX/n8GwNoDYrVC7wZJ05+LFSxvuKS87mTGM+8f5FzkWlVxGW22jTF+StfkENe6ShXAj2q4dsgM="

@@ -52,8 +52,10 @@ frontend:
 
 database:
   # Nom du Secret Kubernetes (créé HORS du chart) contenant la clé `password`.
-  # Phase 4 : kubectl create secret ; Phase 6 : SealedSecret versionné dans Git.
+  # Phase 4 : kubectl create secret ; Phase 6 : SealedSecret versionné dans Git (ci-dessous).
   existingSecret: plateforme-db
+  # Mot de passe chiffré par kubeseal (par environnement). Vide = le Secret doit exister.
+  sealedPassword: ""
   name: plateforme
   user: plateforme
   port: 5432
