@@ -20,6 +20,9 @@ spec:
           for: 30s
           labels:
             severity: critical
+            # Les agrégations (min, sum) suppriment les labels : on rétablit l'environnement
+            # (sinon les alertes de dev et de prod seraient identiques et fusionnées)
+            namespace: {{ $ns }}
           annotations:
             summary: "PostgreSQL injoignable depuis l'API ({{ $ns }})"
             description: "La readiness de l'API échoue sur la base depuis plus de 30 s : les pods sont retirés du Service."
@@ -33,6 +36,9 @@ spec:
           for: 1m
           labels:
             severity: critical
+            # Les agrégations (min, sum) suppriment les labels : on rétablit l'environnement
+            # (sinon les alertes de dev et de prod seraient identiques et fusionnées)
+            namespace: {{ $ns }}
           annotations:
             summary: "Aucune réplique de l'API disponible ({{ $ns }})"
             description: "Le service est indisponible pour les utilisateurs depuis plus d'une minute."
@@ -49,6 +55,9 @@ spec:
           for: 1m
           labels:
             severity: critical
+            # Les agrégations (min, sum) suppriment les labels : on rétablit l'environnement
+            # (sinon les alertes de dev et de prod seraient identiques et fusionnées)
+            namespace: {{ $ns }}
           annotations:
             summary: "Plus de {{ mulf .Values.monitoring.alerts.errorRatioThreshold 100 }} % d'erreurs 5xx pour les utilisateurs ({{ $ns }})"
             description: "Taux actuel : {{ "{{" }} $value | humanizePercentage {{ "}}" }} sur 2 minutes."
@@ -62,6 +71,9 @@ spec:
           for: 5m
           labels:
             severity: warning
+            # Les agrégations (min, sum) suppriment les labels : on rétablit l'environnement
+            # (sinon les alertes de dev et de prod seraient identiques et fusionnées)
+            namespace: {{ $ns }}
           annotations:
             summary: "Latence p95 de l'API > {{ .Values.monitoring.alerts.latencyP95Seconds }} s ({{ $ns }})"
             description: "p95 actuel : {{ "{{" }} $value | humanizeDuration {{ "}}" }}."
