@@ -186,7 +186,11 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] Panne contrôlée via Git : alertes dans Alertmanager en 63–94 s ; retour en 166 s ; résolution en 359 s
   - [x] Corrigés : label namespace des alertes, PodMonitor mal placé, node-exporter bridé, probes PostgreSQL
   - [x] Incident documenté : gel de la VM par l'hôte → cascade de redémarrages (charge 52), reprise auto
-- [ ] Phase 8 — Documentation professionnelle
+- [x] **Phase 8 — Documentation professionnelle** (terminée le 2026-10-14)
+  - [x] README professionnel (résultats mesurés, installation, démo, limites), liens vérifiés
+  - [x] docs/architecture : 2 diagrammes Mermaid + PNG (mermaid-cli 11.17.1 en Docker)
+  - [x] scripts/demo.sh (6 scénarios, `panne` protégé par --oui), shellcheck OK, exécuté
+  - [x] Validation sur clone neuf (12 contrôles) + idempotence (Ansible changed=0, Terraform 0 changement)
 - [ ] Phase 9 — Rapport (pandoc)
 - [ ] Phase 10 — Présentation (marp)
 

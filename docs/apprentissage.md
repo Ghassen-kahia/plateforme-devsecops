@@ -994,3 +994,59 @@ sum(rate(traefik_service_requests_total{code=~"5.."}[2m])) / sum(rate(traefik_se
    2) Mesurer : `top` instantané (et non `ps`, qui donne une moyenne sur la vie du processus), `vmstat`,
    historique Prometheus (CPU par mode, PSI, swap). 3) Chercher les trous : un trou de 25 min dans le
    journal système a révélé un gel de la VM. 4) Corriger la cause de fond (marge CPU), puis remesurer.
+
+---
+
+## Phase 8 — Documentation professionnelle et vérification de la reproductibilité
+
+### Ce qui a été produit
+
+- **README** : problématique, résultats mesurés, stack, architecture, installation pas à pas,
+  démonstration, règles d'exploitation, limites. Tous les chemins référencés ont été vérifiés.
+- **`docs/architecture/`** : deux diagrammes Mermaid (chaîne DevSecOps, exécution dans k3s), rendus
+  nativement par GitHub, et exportés en PNG avec l'image Docker `minlag/mermaid-cli:11.17.1`.
+- **`scripts/demo.sh`** : scénarios `etat`, `securite`, `derive`, `historique`, `acces` (sans effet
+  durable) et `panne --oui` (deux commits : panne puis revert, avec confirmation explicite).
+
+### Vérification « depuis un environnement propre »
+
+La VM ne peut pas être réinstallée sans détruire l'environnement. La procédure retenue est **non
+destructive** :
+1. **Clone neuf depuis GitHub** dans un répertoire temporaire, nouveau venv, sans état Terraform ni
+   cache local : les 12 contrôles documentés y sont rejoués (ruff, pytest, compose config, terraform
+   fmt/validate, ansible-lint + syntaxe, helm lint, actionlint, shellcheck, trivy, gitleaks, semgrep).
+2. **Réexécution idempotente** des procédures sur le système réel : `ansible-playbook --check` → 0
+   changement ; `terraform plan` → 0 changement ; `install.sh check` → OK ; applications Argo CD
+   Synced/Healthy.
+3. **Exécution réelle** des scénarios de `demo.sh`.
+
+Limite : cela ne prouve pas une installation sur une VM vierge (dépendances implicites de l'hôte).
+Une étape suivante serait de la rejouer dans une VM jetable (Vagrant/Multipass) en CI.
+
+### Problèmes révélés par cette vérification
+
+| Problème | Cause | Solution |
+|---|---|---|
+| Gitleaks échoue sur un clone neuf | Le clone contient `origin/demo/secret-factice` (secret factice de la PR #1) ; le scan hebdomadaire `--all` aurait échoué chaque semaine | Exception limitée au SHA exact du commit de démonstration ; contrôle positif : un nouveau secret sur la même branche est détecté |
+| Contrôle positif Gitleaks invalide (×2) | 1) changement de branche refusé, nouveau fichier non indexé ; 2) clé nommée `AUTRE_CLE` (la règle cherche des mots-clés anglais : key, token…) | Réinitialisation, `git add -A`, nom réaliste `BACKUP_API_KEY` |
+| Ansible `changed=1` | Rafraîchissement de l'index APT (`cache_valid_time`) | `changed_when: false` : un cache rafraîchi n'est pas une modification de configuration |
+| `demo.sh` code 141 | SIGPIPE : `kubectl … \| head -1` avec `set -o pipefail` | `jsonpath='{.items[0].metadata.name}'` |
+| Pipeline en échec (run 38613831228) | `ENOTFOUND` lors de l'envoi d'un artefact (réseau du runner GitHub) | Aucun déploiement partiel (GitOps sauté). **Ne pas relancer** : un commit plus récent était déjà déployé, et relancer aurait ramené dev à une image plus ancienne |
+| Options de mermaid-cli | `-w` n'existe pas dans la version 11 | Lecture de `--help` ; `-s 2` (échelle) |
+
+### Questions d'entretien — Phase 8
+
+1. **Comment prouvez-vous que votre projet est reproductible ?**
+   Par un clone neuf depuis GitHub, sans aucun état local, sur lequel je rejoue tous les contrôles
+   documentés ; par la réexécution idempotente des procédures (Ansible `--check` et Terraform `plan`
+   sans changement) ; par des versions figées partout (paquets, images, actions, collections,
+   providers avec lock). La limite reste une installation sur VM vierge, à automatiser.
+2. **Un pipeline a échoué pour une raison réseau. Le relancez-vous ?**
+   Pas sans réfléchir. Ici, un commit plus récent avait déjà été déployé : relancer l'ancien run aurait
+   poussé un commit GitOps avec une image plus ancienne, et donc fait revenir dev en arrière. En GitOps,
+   relancer un ancien pipeline n'est pas neutre ; il faut vérifier ce qui est déployé et, au besoin,
+   repartir du dernier commit.
+3. **Pourquoi une exception sur un commit précis plutôt que sur un fichier ?**
+   Une exception par fichier ou par chemin masque aussi les vrais secrets ajoutés plus tard au même
+   endroit. Une exception par SHA ne couvre que le contenu connu et justifié. Je l'ai prouvé par un
+   contrôle positif.

@@ -2,6 +2,9 @@
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  # Rafraîchir le cache (s'il a plus d'une heure) ne change pas la configuration du système :
+  # sans cela, chaque exécution espacée d'une heure apparaîtrait faussement « changed ».
+  changed_when: false
 
 - name: Appliquer toutes les mises à jour disponibles
   ansible.builtin.apt:

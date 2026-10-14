@@ -1,0 +1,35 @@
+flowchart TB
+  user([Utilisateur]) -->|HTTP dev.plateforme.local / plateforme.local| traefik
+
+  subgraph KS["kube-system"]
+    traefik[Traefik<br/>Ingress]
+    sscontroller[Contrôleur Sealed Secrets]
+  end
+
+  subgraph NS["plateforme-prod — PSA restricted, ResourceQuota, NetworkPolicy deny-all"]
+    fe[Frontend Nginx<br/>2 répliques, UID 10101]
+    api[API FastAPI<br/>HPA 2→4, UID 10001]
+    db[(PostgreSQL 18<br/>StatefulSet + PVC, UID 10070)]
+    sec[[Secret plateforme-db<br/>issu d'un SealedSecret]]
+    fe -->|/api| api -->|5432| db
+    sec -.-> api & db
+  end
+
+  traefik -->|8080| fe
+
+  subgraph MON["monitoring — PSA privileged"]
+    prom[Prometheus]
+    am[Alertmanager]
+    graf[Grafana]
+    prom --> am
+    graf --> prom
+  end
+
+  prom -.ServiceMonitor 15 s.-> api
+  prom -.PodMonitor 15 s.-> traefik
+  sscontroller -.déchiffre.-> sec
+
+  subgraph AR["argocd — PSA baseline"]
+    argocd[Argo CD<br/>AppProject restreint]
+  end
+  argocd -->|applique l'état désiré| NS

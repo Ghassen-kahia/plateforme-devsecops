@@ -1,0 +1,35 @@
+flowchart LR
+  dev([Développeur]) -->|git push| gh[(GitHub<br/>plateforme-devsecops)]
+
+  subgraph CI["GitHub Actions — CI DevSecOps"]
+    direction TB
+    lint[Lint + tests<br/>ruff, pytest, PostgreSQL]
+    gl[Gitleaks<br/>secrets]
+    sg[Semgrep<br/>SAST]
+    iac[Trivy config + SCA<br/>terraform, helm, ansible-lint]
+    build[Build image<br/>multi-stage, non-root]
+    tri[Trivy image<br/>HIGH/CRITICAL bloquants]
+    push[Publication GHCR<br/>tag sha-12]
+    gitops[Commit GitOps<br/>k8s/environments/dev]
+    lint & gl & sg & iac --> build --> tri --> push --> gitops
+  end
+
+  gh --> CI
+  push --> ghcr[(GHCR<br/>images publiques)]
+  gitops --> gh
+  promote[promote.yml<br/>manuel] -->|tag validé| gh
+
+  subgraph K3S["k3s — VM Ubuntu (Ansible, Terraform local)"]
+    direction TB
+    argo[Argo CD<br/>sync auto + self-heal]
+    ss[Sealed Secrets]
+    devns[plateforme-dev]
+    prodns[plateforme-prod]
+    mon[Prometheus + Alertmanager<br/>+ Grafana]
+    argo --> devns & prodns
+    ss -.secrets déchiffrés.-> devns & prodns
+    mon -.collecte /metrics.-> devns & prodns
+  end
+
+  gh -->|pull toutes les 60 s| argo
+  ghcr -->|pull images| devns & prodns

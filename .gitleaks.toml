@@ -12,3 +12,11 @@ useDefault = true
 description = "Valeurs chiffrées par Sealed Secrets (kubeseal)"
 regexTarget = "line"
 regexes = ['''^\s*sealedPassword:\s*"Ag[A-Za-z0-9+/=]{300,}"\s*$''']
+
+# Commit de DÉMONSTRATION (PR #1, fermée sans fusion) : clé FACTICE générée aléatoirement pour
+# prouver que Gitleaks bloque le pipeline. La branche demo/secret-factice est conservée comme preuve ;
+# sans cette exception, le scan hebdomadaire (--all) échouerait chaque semaine sur ce faux secret.
+# Exception limitée à CE commit précis : tout autre secret, y compris sur cette branche, reste détecté.
+[[allowlists]]
+description = "Secret factice de la démonstration PR #1"
+commits = ["bca0ad854765af25d1a36274d4d38524d1654a94"]

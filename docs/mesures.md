@@ -313,6 +313,20 @@ et 20:04 (aucune ligne de journal). Elle a néanmoins permis de détecter l'abse
   nouvelle image) et la différence (+6 points) est du même ordre que la variabilité normale. On peut
   seulement conclure que les probes n'étaient pas la cause principale de la charge.
 
+## M10 — Reproductibilité (Phase 8)
+
+- **Date** : 2026-10-14.
+
+| Contrôle | Résultat |
+|---|---|
+| Clone neuf depuis GitHub : 12 contrôles documentés | 11/12 puis 12/12 après l'exception Gitleaks du commit de démonstration |
+| `ansible-playbook site.yml --check` | ok=19, **changed=0** (après correctif du cache APT) |
+| `terraform plan -detailed-exitcode` (local) | code 0 : aucune dérive |
+| Applications Argo CD | 3/3 Synced/Healthy |
+| `demo.sh` (etat, securite, derive, historique, acces) | exécutés ; dérive corrigée en 10,5 s |
+
+- **Limites** : vérification non destructive (pas de réinstallation d'une VM vierge).
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
