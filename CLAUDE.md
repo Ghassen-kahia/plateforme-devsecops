@@ -191,10 +191,22 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] docs/architecture : 2 diagrammes Mermaid + PNG (mermaid-cli 11.17.1 en Docker)
   - [x] scripts/demo.sh (6 scénarios, `panne` protégé par --oui), shellcheck OK, exécuté
   - [x] Validation sur clone neuf (12 contrôles) + idempotence (Ansible changed=0, Terraform 0 changement)
-- [ ] Phase 9 — Rapport (pandoc)
+- [x] **Phase 9 — Rapport technique** (terminé le 2026-10-14)
+  - [x] docs/rapport/rapport.md (9 parties + annexe, ≈ 5 600 mots, 8 emplacements de capture)
+  - [x] DOCX et PDF générés par pandoc/latex:3.11.0 (Docker), 0 avertissement ; rendu vérifié visuellement
+  - [x] Tableaux comparatifs : k3s/minikube/kind/kubeadm, Jenkins/GitHub Actions/GitLab CI, Argo CD/Flux, outils de sécurité
+  - [x] Bibliographie : 20 sources réelles (ouvrages, NIST, CIS, documentations officielles)
 - [ ] Phase 10 — Présentation (marp)
 
 Installation des outils : **juste-à-temps**, dans la phase qui en a besoin (cibles ajoutées à `scripts/install.sh`).
+
+## 8 bis. Régénérer le rapport
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/data" -w /data/docs/rapport pandoc/latex:3.11.0 \
+  rapport.md --resource-path=.:../architecture --pdf-engine=xelatex -o rapport.pdf   # idem -o rapport.docx
+```
+Éviter les caractères absents de Latin Modern (ex. ≈ → « environ »).
 
 ## 9. Commandes de validation
 

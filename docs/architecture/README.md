@@ -13,11 +13,11 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/docs/architecture:/data" minlag/
 ![Chaîne DevSecOps](chaine-devsecops.png)
 
 ```mermaid
-flowchart LR
+flowchart TB
   dev([Développeur]) -->|git push| gh[(GitHub<br/>plateforme-devsecops)]
 
   subgraph CI["GitHub Actions — CI DevSecOps"]
-    direction TB
+    direction LR
     lint[Lint + tests<br/>ruff, pytest, PostgreSQL]
     gl[Gitleaks<br/>secrets]
     sg[Semgrep<br/>SAST]
@@ -35,7 +35,7 @@ flowchart LR
   promote[promote.yml<br/>manuel] -->|tag validé| gh
 
   subgraph K3S["k3s — VM Ubuntu (Ansible, Terraform local)"]
-    direction TB
+    direction LR
     argo[Argo CD<br/>sync auto + self-heal]
     ss[Sealed Secrets]
     devns[plateforme-dev]

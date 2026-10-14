@@ -1050,3 +1050,17 @@ Une étape suivante serait de la rejouer dans une VM jetable (Vagrant/Multipass)
    Une exception par fichier ou par chemin masque aussi les vrais secrets ajoutés plus tard au même
    endroit. Une exception par SHA ne couvre que le contenu connu et justifié. Je l'ai prouvé par un
    contrôle positif.
+
+---
+
+## Phase 9 — Rapport technique
+
+- Pandoc convertit le Markdown en DOCX et en PDF (moteur xelatex), via l'image Docker `pandoc/latex:3.11.0` :
+  aucune installation de TeX Live (≈ 2 Go) sur la VM, et un rendu identique partout.
+- Problèmes rencontrés : le caractère `≈` est absent de la police Latin Modern (il aurait été invisible
+  dans le PDF), d'où son remplacement par « environ » ; la figure de la chaîne CI était illisible au
+  format 4:1, d'où un nouveau diagramme de haut en bas.
+- Vérification visuelle des pages (table des matières, tableaux larges, figures), et pas seulement
+  l'absence d'erreur de compilation.
+- Règle d'honnêteté : chaque chiffre du rapport provient de `docs/mesures.md`, les mesures sont
+  présentées comme ponctuelles (ordre de grandeur), et les perspectives sont distinguées des résultats.
