@@ -129,6 +129,13 @@ docs/{apprentissage.md,mesures.md,architecture,rapport,presentation}
 scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
 ```
 
+## 7 bis. État final du projet (2026-10-14)
+
+Toutes les phases 0 à 10 sont terminées. Livrables : dépôt public, pipeline vert, dev/prod via Argo CD,
+supervision active, README, rapport (MD/DOCX/PDF), présentation (MD/PDF/PPTX), script oral, demo.sh.
+Reste à l'utilisateur : ses propres captures d'écran (emplacements `[CAPTURE : …]` dans le rapport et
+les diapositives). Sécurité : retirer `/etc/sudoers.d/claude-nopasswd` quand le travail avec l'agent est fini.
+
 ## 8. Plan des phases
 
 - [x] **Phase 0 — Audit et préparation** (terminée le 2026-10-14)
@@ -196,9 +203,19 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] DOCX et PDF générés par pandoc/latex:3.11.0 (Docker), 0 avertissement ; rendu vérifié visuellement
   - [x] Tableaux comparatifs : k3s/minikube/kind/kubeadm, Jenkins/GitHub Actions/GitLab CI, Argo CD/Flux, outils de sécurité
   - [x] Bibliographie : 20 sources réelles (ouvrages, NIST, CIS, documentations officielles)
-- [ ] Phase 10 — Présentation (marp)
+- [x] **Phase 10 — Présentation** (terminée le 2026-10-14)
+  - [x] docs/presentation/presentation.md : 14 diapositives Marp → PDF et PPTX (marp-cli v4.5.1, Docker), rendu vérifié
+  - [x] Diagramme simplifié pour les diapositives (docs/architecture/chaine-simple.mmd)
+  - [x] docs/presentation/script.md : script oral ≈ 10 min, transitions, questions probables
 
 Installation des outils : **juste-à-temps**, dans la phase qui en a besoin (cibles ajoutées à `scripts/install.sh`).
+
+## 8 ter. Régénérer la présentation
+
+```bash
+docker run --rm -v "$PWD:/home/marp/app" -e MARP_USER="$(id -u):$(id -g)" marpteam/marp-cli:v4.5.1 \
+  docs/presentation/presentation.md --pdf --allow-local-files -o docs/presentation/presentation.pdf   # ou --pptx
+```
 
 ## 8 bis. Régénérer le rapport
 

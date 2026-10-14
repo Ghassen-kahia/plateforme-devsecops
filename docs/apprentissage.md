@@ -1064,3 +1064,17 @@ Une étape suivante serait de la rejouer dans une VM jetable (Vagrant/Multipass)
   l'absence d'erreur de compilation.
 - Règle d'honnêteté : chaque chiffre du rapport provient de `docs/mesures.md`, les mesures sont
   présentées comme ponctuelles (ordre de grandeur), et les perspectives sont distinguées des résultats.
+
+---
+
+## Phase 10 — Présentation de soutenance
+
+- **Marp** convertit du Markdown en diapositives (PDF et PPTX), via l'image `marpteam/marp-cli:v4.5.1`
+  qui embarque Chromium ; `--allow-local-files` est nécessaire pour charger les images locales.
+- Une diapositive n'est pas une page de rapport : le diagramme détaillé débordait du format 16:9, d'où
+  un **diagramme simplifié** dédié (moins de boîtes, texte lisible à distance).
+- Script oral : la durée a été **calculée** (1 079 mots prononcés à 130 mots/min, plus les transitions
+  et la démonstration), et non estimée. Un plan B (captures) est prévu si la démonstration en direct
+  est impossible.
+- Principe : une idée forte et un chiffre mesuré par diapositive ; dire « projet personnel » ; ne citer
+  que des mesures de `docs/mesures.md`.

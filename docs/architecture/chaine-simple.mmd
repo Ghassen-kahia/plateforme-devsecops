@@ -1,0 +1,15 @@
+flowchart LR
+  dev([git push]) --> ci
+  subgraph ci["CI GitHub Actions"]
+    direction TB
+    c1["Tests · Gitleaks<br/>Semgrep · Trivy IaC/SCA"] --> c2["Build + Trivy image<br/>(bloquant)"]
+  end
+  c2 --> ghcr[(GHCR<br/>sha-12)]
+  c2 --> git[(Git<br/>état désiré)]
+  subgraph k3s["Cluster k3s"]
+    direction TB
+    argo["Argo CD<br/>sync + self-heal"] --> envs["dev · prod"]
+    mon["Prometheus<br/>Alertmanager · Grafana"] -.-> envs
+  end
+  git -->|pull 60 s| argo
+  ghcr -->|images| envs
