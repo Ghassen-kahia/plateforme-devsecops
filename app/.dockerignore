@@ -1,0 +1,7 @@
+# Liste blanche : tout est exclu, puis seuls les fichiers nécessaires au build sont autorisés.
+# Évite d'envoyer au démon Docker (et donc potentiellement dans l'image) .env, .venv, tests, .git...
+*
+!backend/requirements.txt
+!backend/api/
+**/__pycache__
+**/*.pyc

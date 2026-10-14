@@ -1,0 +1,13 @@
+# Politique Trivy du projet — utilisée en local ET dans la CI (une seule source de vérité).
+# Documentation de la politique : docs/securite.md
+severity:
+  - HIGH
+  - CRITICAL
+exit-code: 1            # toute vulnérabilité retenue fait échouer la commande (et donc le pipeline)
+vulnerability:
+  ignore-unfixed: true  # sans correctif publié : non bloquant, mais tracé dans les rapports complets
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig

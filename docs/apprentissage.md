@@ -210,3 +210,108 @@ curl -s localhost:8000/metrics | grep ^http_requests_total           # métrique
    1) `/health` répond-il ? Si oui, le processus est vivant. 2) `/ready` : la base est-elle joignable ?
    3) Logs de l'API : message psycopg (DNS, refus de connexion, authentification). 4) État de la base :
    `docker compose ps`, `pg_isready`. 5) Métrique `app_database_up` dans Prometheus.
+
+---
+
+## Phase 2 — Conteneurisation sécurisée
+
+### Ce qu'est une vulnérabilité « dans une image »
+
+Une image contient un système de fichiers complet : paquets de l'OS (Debian, Alpine), runtime
+(Python) et dépendances applicatives (pip). Trivy lit les bases de paquets (`/var/lib/dpkg/status`,
+`*.dist-info`) et compare chaque version installée aux bases de CVE (NVD, avis Debian, GitHub Advisories).
+**Conséquence directe : chaque paquet inutile est une surface d'attaque et du bruit dans les rapports.**
+
+### Résultats mesurés (détail dans mesures.md)
+
+| | Avant | Après |
+|---|---|---|
+| API : CRITICAL / HIGH | 16 / 313 | **0 / 44** (toutes sans correctif) |
+| API : total | 3 695 | 166 (−95,5 %) |
+| API : taille | 1,69 GB | 221 MB (−87 %) |
+| Frontend : CRITICAL / HIGH | 1 / 67 | **0 / 0** |
+| Frontend : taille | 240 MB | 90,1 MB |
+| Utilisateur | root | 10001 / 101 |
+
+**Constat important** : les dépendances de l'application (FastAPI, psycopg…) n'avaient **aucune**
+vulnérabilité. Tout le risque venait de l'image de base, d'où l'intérêt du choix de la base.
+
+### Techniques utilisées
+
+- **Multi-stage build** : l'étape `build` crée un venv avec pip ; l'étape `runtime` ne copie que
+  `/opt/venv`. Les outils de construction ne partent pas en production.
+- **Image slim** : variante Debian sans compilateurs ni documentation.
+  Alpine (musl) a été écartée pour Python : les roues binaires `manylinux` (psycopg) visent la glibc,
+  les builds sont plus lents et des différences de comportement apparaissent.
+- **Suppression de pip** : un attaquant qui obtient une exécution de code ne peut plus faire `pip install`.
+- **UID numérique fixe** (`USER 10001:10001`) : Kubernetes peut vérifier `runAsNonRoot` avec un UID
+  numérique, mais pas avec un nom d'utilisateur.
+- **Code possédé par root, exécuté par 10001** : le processus ne peut pas modifier son propre code.
+- **`.dockerignore` en liste blanche** : sans lui, `COPY . .` peut embarquer `.env`, `.git` ou `.venv`.
+  La liste blanche est plus sûre qu'une liste noire, car un nouveau fichier sensible est exclu par défaut.
+- **HEALTHCHECK** : utile pour Docker/Compose (statut `healthy`). Kubernetes l'ignore et utilise ses probes.
+
+### Concept : défense en profondeur
+
+Aucune mesure n'est suffisante seule. Image minimale (moins de failles) + non-root (moins de
+privilèges en cas d'exploitation) + rootfs en lecture seule (pas de persistance d'un malware) +
+`cap_drop: ALL` (pas d'opérations noyau privilégiées) + `no-new-privileges` (pas d'élévation via setuid).
+
+### Commandes utiles
+
+```bash
+trivy image --config trivy.yaml plateforme-api:dev            # contrôle bloquant (politique du projet)
+trivy image --format json -o reports/x.json plateforme-api:dev # rapport complet (toutes sévérités)
+trivy config app/                                             # mauvaises configurations des Dockerfiles
+docker exec plateforme-api-1 grep CapEff /proc/1/status       # capacités effectives (0 = aucune)
+trivy clean --scan-cache                                      # libérer le cache des couches
+docker builder prune -f                                       # libérer le cache de build
+```
+
+### Erreurs rencontrées — Phase 2
+
+| Problème | Cause | Solution |
+|---|---|---|
+| `useradd warning: uid 10001 is greater than SYS_UID_MAX` | `--system` attend un UID < 1000 | Retrait de `--system` (l'UID explicite suffit) |
+| Avertissement pip « Running as root » | Désinstallation de pip en root pendant le build | `--root-user-action=ignore` (action voulue) |
+| +6 Go de disque utilisés | Cache Trivy (base Java 1,5 Go inutile ici) et cache de build Docker 2,2 Go | `trivy clean --java-db --scan-cache`, `docker builder prune` |
+| 44 HIGH restantes sur l'API | Paquets Essential de Debian sans correctif publié | Politique `ignore-unfixed` documentée (docs/securite.md) |
+
+### Perspectives
+
+- **Distroless** (`gcr.io/distroless/python3`) : pas de shell ni de gestionnaire de paquets, ce qui
+  supprimerait la plupart des 44 HIGH restantes. Compromis : Python fourni par Debian (3.13 et non
+  3.12), débogage via conteneurs éphémères (`kubectl debug`) uniquement.
+- Images Chainguard/Wolfi : très peu de CVE, mais les tags versionnés gratuits sont limités.
+- Signature (cosign) et SBOM (Syft/Trivy) en CI.
+
+### Questions d'entretien — Phase 2
+
+1. **Quelle différence entre une vulnérabilité « fixed » et « unfixed », et comment les traitez-vous ?**
+   « Fixed » signifie que l'éditeur de la distribution a publié une version corrigée : on peut et on
+   doit mettre à jour, donc le pipeline bloque. « Unfixed » signifie que la CVE est connue mais qu'aucun
+   paquet corrigé n'existe (statut Debian `affected`, `fix_deferred`). Les bloquer rendrait le pipeline
+   rouge en permanence, sans action possible. Elles sont tracées, leur exposition est évaluée, et elles
+   deviennent bloquantes dès qu'un correctif sort et que l'image n'est pas reconstruite.
+2. **Pourquoi l'image API a-t-elle perdu 87 % de sa taille ?**
+   L'image `python:3.12` complète contient la toolchain de compilation, les en-têtes de développement
+   et de nombreuses bibliothèques (ImageMagick, X11…). `slim` n'en garde que le nécessaire, et le
+   multi-stage évite le cache pip et pip lui-même.
+3. **Un conteneur non-root suffit-il à le sécuriser ?**
+   Non, c'est une couche parmi d'autres. Le noyau est partagé avec l'hôte. Il faut aussi supprimer les
+   capacités, interdire l'élévation de privilèges, utiliser un rootfs en lecture seule, s'appuyer sur
+   les profils seccomp et AppArmor et appliquer des politiques réseau. Il faut enfin maintenir les images à jour.
+4. **Pourquoi Debian slim plutôt qu'Alpine pour Python ?**
+   Alpine utilise musl, alors que la plupart des roues binaires Python sont compilées pour la glibc
+   (`manylinux`). Sur Alpine, pip compile souvent depuis les sources, ce qui donne des builds plus longs,
+   un compilateur dans l'image de build et des différences de comportement subtiles. Pour Nginx, qui est
+   compilé par l'éditeur, Alpine convient parfaitement.
+5. **(Dépannage)** **Votre conteneur durci plante avec « Read-only file system » : que faites-vous ?**
+   J'identifie le chemin écrit (log d'erreur). Je monte un volume temporaire (`tmpfs` dans Compose,
+   `emptyDir` dans Kubernetes) uniquement sur ce chemin, au lieu de désactiver le read-only. Exemple
+   réel : Nginx doit écrire `/tmp`, `/var/cache/nginx` et `/etc/nginx/conf.d` (configuration générée
+   par envsubst).
+6. **(Compromis)** **Pourquoi ne pas avoir utilisé distroless ?**
+   Voir les perspectives : gain de sécurité réel, mais changement de version de Python et débogage plus
+   difficile. J'ai préféré une base slim maîtrisée, une politique explicite et des mesures documentées,
+   en gardant distroless comme amélioration suivante.

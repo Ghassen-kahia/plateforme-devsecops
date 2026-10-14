@@ -4,6 +4,7 @@
 # =============================================================================
 # Usage :
 #   sudo bash scripts/install.sh base      # Phase 0 : Docker Engine + Compose, Python venv
+#   sudo bash scripts/install.sh scan      # Phase 2 : Trivy (scan d'images, IaC, secrets)
 #   sudo bash scripts/install.sh check     # Vérification (sans sudo possible)
 #
 # Principes :
@@ -64,6 +65,27 @@ https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
   fi
 }
 
+# Ajoute un dépôt APT signé : $1 = nom, $2 = URL de la clé, $3 = ligne "deb" (sans signed-by)
+add_apt_repo() {
+  local name=$1 key_url=$2 deb_line=$3
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "$key_url" | gpg --dearmor --yes -o "/etc/apt/keyrings/${name}.gpg"
+  chmod a+r "/etc/apt/keyrings/${name}.gpg"
+  echo "deb [signed-by=/etc/apt/keyrings/${name}.gpg] ${deb_line}" > "/etc/apt/sources.list.d/${name}.list"
+}
+
+install_trivy() {
+  if command -v trivy >/dev/null 2>&1; then
+    log "Trivy déjà présent : $(trivy --version | head -1) — étape ignorée"
+    return
+  fi
+  log "Installation de Trivy depuis le dépôt APT officiel d'Aqua Security"
+  add_apt_repo trivy https://get.trivy.dev/deb/public.key \
+    "https://get.trivy.dev/deb generic main"
+  apt-get update -q
+  apt-get install -y -q trivy
+}
+
 check() {
   log "Vérification des prérequis"
   local ok=0
@@ -83,11 +105,16 @@ case "${1:-}" in
     install_docker
     check
     ;;
+  scan)
+    require_root
+    install_trivy
+    trivy --version | head -1
+    ;;
   check)
     check
     ;;
   *)
-    echo "Usage : sudo bash $0 base | bash $0 check"
+    echo "Usage : sudo bash $0 base|scan  |  bash $0 check"
     exit 2
     ;;
 esac

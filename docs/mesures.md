@@ -65,12 +65,48 @@ ses limites. Aucune valeur estimée ne figure dans les tableaux de résultats.
   mesurée au repos, pas sous charge ; les tailles sont celles affichées par Docker 29 (stockage
   containerd), à comparer uniquement entre elles.
 
+## M3 — Vulnérabilités avant/après durcissement (Phase 2)
+
+- **Date** : 2026-10-14
+- **Outil** : Trivy 0.76.0, base de vulnérabilités téléchargée le jour même.
+- **Méthode** : `trivy image --format json` (toutes sévérités, correctifs ou non), puis comptage avec `jq`
+  par sévérité. Le contrôle bloquant utilise `trivy.yaml` (HIGH/CRITICAL, `ignore-unfixed`).
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN | Total | HIGH+CRIT sans correctif | Taille | Utilisateur |
+|---|---|---|---|---|---|---|---|---|---|
+| API avant (`python:3.12.15`) | 16 | 313 | 1 584 | 1 633 | 149 | 3 695 | 317 | 1,69 GB | root |
+| API après (slim, multi-stage) | **0** | **44** | 58 | 61 | 3 | **166** | 44 | **221 MB** | 10001 |
+| Frontend avant (`nginx:1.30.5`) | 1 | 67 | 108 | 132 | 93 | 401 | 64 | 240 MB | root |
+| Frontend après (unprivileged-alpine) | **0** | **0** | 1 | 0 | 0 | **1** | 0 | **90,1 MB** | 101 |
+
+| Contrôle bloquant (`trivy image --config trivy.yaml`) | Code retour |
+|---|---|
+| `plateforme-api:dev` (durcie) | 0 (réussi) |
+| `plateforme-frontend:dev` (durcie) | 0 (réussi) |
+| `python:3.12.15` (contrôle négatif) | **1 (bloqué : 12 HIGH corrigeables)** |
+
+| Mauvaises configurations Dockerfile (`trivy config app/`) | Avant | Après |
+|---|---|---|
+| DS-0002 (HIGH, utilisateur root) | 2 | 0 |
+| DS-0026 (LOW, pas de HEALTHCHECK) | 2 | 0 |
+
+| Autre mesure | Résultat |
+|---|---|
+| Rebuild des 2 images durcies (images de base à télécharger) | 26 s |
+| Mémoire au repos après durcissement | API 54 MiB, Nginx 3,5 MiB, PostgreSQL 33 MiB |
+| Tests complets contre la stack durcie | 20 réussis, 0 échec |
+| Cache Trivy après nettoyage | 1,6 GB (base de vulnérabilités) |
+
+- **Limites** : les chiffres dépendent de la date de la base de vulnérabilités (une même image
+  scannée plus tard peut avoir plus ou moins de CVE). Les « 12 HIGH » du contrôle négatif sont
+  comptés après le filtre `ignore-unfixed`. La taille est celle affichée par Docker 29.
+
 ## Mesures à réaliser (phases suivantes)
 
 | Indicateur | Phase | Statut |
 |---|---|---|
 | Résultats des tests automatisés | 1, 5 | Phase 1 mesurée (M2) ; CI à mesurer |
-| Vulnérabilités avant/après correction, par sévérité | 2 | à mesurer |
+| Vulnérabilités avant/après correction, par sévérité | 2 | mesuré (M3) |
 | Temps de déploiement manuel (Helm) | 4 | à mesurer |
 | Consommation CPU/RAM du cluster | 4, 6, 7 | à mesurer |
 | Durée du pipeline CI | 5 | à mesurer |

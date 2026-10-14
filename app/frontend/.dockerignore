@@ -1,0 +1,6 @@
+# Liste blanche : seuls les fichiers servis et la configuration Nginx entrent dans le contexte
+*
+!index.html
+!style.css
+!app.js
+!default.conf.template

@@ -30,6 +30,7 @@ Toute la documentation et les explications sont **en français**.
 
 Outils présents : git 2.43, python3 3.12.3, curl, jq, ufw.
 Installés en Phase 0 : Docker Engine 29.9.0, Compose v5.6.0, Buildx 0.38.0, containerd 2.4.2, python3-venv, pip, make.
+Installés en Phase 2 : Trivy 0.76.0.
 Encore absents : kubectl, helm, k3s, terraform, ansible, trivy, gitleaks, semgrep, pandoc, marp, node.
 
 ## 3. Stack retenue et justification courte
@@ -105,8 +106,12 @@ scripts/{install.sh,demo.sh}  .gitignore  .env.example  README.md  CLAUDE.md
   - [x] PostgreSQL 18 via Compose, ports sur 127.0.0.1
   - [x] 16 tests unitaires + 4 d'intégration (réussis contre un vrai PostgreSQL)
   - [x] Panne de base simulée : liveness OK, readiness 503, reprise ≈ 1 s
-  - [ ] (Phase 2) Dockerfiles encore naïfs : root, 1,69 GB
-- [ ] Phase 2 — Conteneurisation sécurisée (+ installation Trivy)
+- [x] **Phase 2 — Conteneurisation sécurisée** (terminée le 2026-10-14)
+  - [x] Trivy 0.76.0 installé (`install.sh scan`), politique `trivy.yaml`
+  - [x] API : multi-stage slim, UID 10001, sans pip ; frontend : nginx-unprivileged alpine, UID 101
+  - [x] `.dockerignore` en liste blanche, Compose : read_only, cap_drop ALL, no-new-privileges
+  - [x] Avant/après mesuré (docs/mesures.md M3) ; contrôle négatif bloquant vérifié
+  - [x] Politique de sécurité : docs/securite.md
 - [ ] Phase 3 — Terraform et Ansible (+ installation terraform, ansible ; k3s via Ansible)
 - [ ] Phase 4 — Kubernetes et Helm (+ kubectl, helm)
 - [ ] Phase 5 — Pipeline CI DevSecOps (+ gitleaks, semgrep en local ; token GitHub à ce moment)
@@ -127,6 +132,8 @@ docker compose --env-file ../.env up -d --build
 set -a; . ../.env; set +a; DB_PASSWORD="$POSTGRES_PASSWORD" RUN_INTEGRATION=1 ../.venv/bin/pytest
 # Environnement
 bash scripts/install.sh check        # prérequis Phase 0
+trivy image --config trivy.yaml plateforme-api:dev   # contrôle de vulnérabilités bloquant
+trivy config app/                    # Dockerfiles
 docker run --rm hello-world          # moteur Docker fonctionnel
 docker compose version
 git status
@@ -146,4 +153,6 @@ git status
 | 2026-10-14 | `httpx` gardé malgré l'avertissement Starlette (httpx2) | Paquet éprouvé ; avertissement filtré et documenté |
 | 2026-10-14 | Dockerfiles naïfs en Phase 1, durcis en Phase 2 | Avant/après Trivy réellement mesuré |
 | 2026-10-14 | Images : python 3.12.15, nginx 1.30.5 (branche stable), postgres 18.6-alpine3.24 | Tags précis relevés sur Docker Hub |
+| 2026-10-14 | Trivy : HIGH/CRITICAL bloquants, `ignore-unfixed` | Bloquer ce qui est corrigeable ; tracer le reste (docs/securite.md) |
+| 2026-10-14 | Debian slim plutôt qu'Alpine (Python) ou distroless | Roues glibc, Python 3.12 conservé, débogage possible ; distroless en perspective |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |
