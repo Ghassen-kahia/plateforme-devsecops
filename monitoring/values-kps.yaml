@@ -78,9 +78,11 @@ grafana:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
+  # Limite CPU relevée de 300m à 1 cœur : bridé en permanence (273m mesurés pour 300m de limite),
+  # Grafana 13 voyait ses accès à sa base interne expirer (pages à 4 min, probes en échec pendant ~2 h).
   resources:
-    requests: { cpu: 25m, memory: 128Mi }
-    limits:   { cpu: 300m, memory: 384Mi }
+    requests: { cpu: 50m, memory: 192Mi }
+    limits:   { cpu: "1", memory: 512Mi }
   # Tableau de bord de l'application provisionné depuis Git (monitoring/dashboards/)
   dashboardProviders:
     dashboardproviders.yaml:
