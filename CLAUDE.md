@@ -299,3 +299,4 @@ git status
 | 2026-10-14 | Panne contrôlée via Git (`database.replicas`) | Le self-heal annulerait un `kubectl scale` |
 | 2026-10-14 | Pandoc et Marp via Docker (versions figées) | Pas de TeX Live ni de navigateur à installer sur la VM |
 | 2026-10-14 | Enchaînement des phases sans attendre `continue` | Demande explicite de l'utilisateur ; arrêt uniquement pour token, dépôt, AWS ou coût |
+| 2026-10-28 | Frontend : nginx-unprivileged 1.30.6 + `apk upgrade` au build | 8 CVE HIGH (nginx, curl, expat, brotli) bloquées par Trivy en CI ; correctifs Alpine absents de l'image amont |
